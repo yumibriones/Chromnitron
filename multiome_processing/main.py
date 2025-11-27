@@ -37,7 +37,7 @@ def main():
     RESOURCES_DIR = setup_config.get("chromnitron_resources_dir", ".")
     INPUTS_DIR = setup_config.get("inputs_dir", ".")
     samplesheet_path = os.path.join(INPUTS_DIR, setup_config.get("sample_sheet", "samplesheet.csv"))
-    mudata_files = setup_config.get("mudata_files", [])
+    mudata_files_list = setup_config.get("mudata_files") or []
     BASE_PROJECT_DIR = setup_config.get("base_project_dir", "output")
     
     project_prefix = setup_config.get("project_prefix", "muon_multiome")
@@ -50,14 +50,10 @@ def main():
     # Load inputs
     samplesheet = pd.read_csv(samplesheet_path, dtype=str)
     samples = samplesheet["sampleName"].tolist()
-    mudata_dict = utils.read_mudata_dict(setup_config.get("mudata_files", []))
-    features_bed_path = os.path.join("data", "raw", "features.bed")
-    if not os.path.exists(features_bed_path):
-        logging.info("Creating features.bed at %s", features_bed_path)
-        features_bed = utils.gff3_to_tss_features(gff_path) if gff_path else None
+    mudata_dict = utils.read_mudata_dict([os.path.join(OUTPUTS_DIR, f) for f in mudata_files_list]) if mudata_files_list else None
     
     # Steps to run
-    STEPS_TO_RUN = config.get("STEPS_TO_RUN", [])
+    STEPS_TO_RUN = config.get("steps_to_run", [])
     
     ### Create 10X Multiome data directories from sample sheet
     if "create_data_dirs" in STEPS_TO_RUN:

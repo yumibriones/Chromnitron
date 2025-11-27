@@ -1,13 +1,13 @@
 setup:
-  chromnitron_resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # Path to input resources
-  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_multiome_twins
+  resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # Path to input resources
+  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_twins
   sample_sheet: samplesheet.csv  # Required: CSV file with columns: sampleName,path (path to 10x multiome data directory)
-  mudata_files: # Optional: path to existing MuData file/s to start from
-    - /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/PsO_multiome/muon_code/outputs/muon_multiome-Rep1-created.h5mu 
-    - /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/PsO_multiome/muon_code/outputs/muon_multiome-Rep2-created.h5mu
-  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/PsO_multiome/muon_multiome_test  # Base directory for outputs
+  mudata_files: # Optional: Names of existing MuData files, should be in base_project_dir/outputs
+    # - mudata1.h5mu
+    # - mudata2.h5mu
+  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/outputs/muon_twins  # Base directory for project outputs
   project_prefix: muon_twins  # Prefix for project files
-
+  
 steps_to_run:  # Define the steps of the pipeline to run, in order (comment out steps to skip)
   - create_data_dirs
   - create_mudata
