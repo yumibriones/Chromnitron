@@ -3,8 +3,8 @@ setup:
   inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_twins
   sample_sheet: samplesheet.csv  # Required: CSV file with columns: sampleName,path (path to 10x multiome data directory)
   mudata_files: # Optional: Names of existing MuData files, should be in base_project_dir/outputs
-    # - mudata1.h5mu
-    # - mudata2.h5mu
+    - muon_twins-Rep1.h5mu
+    - muon_twins-Rep2.h5mu
   base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/outputs/muon_twins  # Base directory for project outputs
   project_prefix: muon_twins  # Prefix for project files
   

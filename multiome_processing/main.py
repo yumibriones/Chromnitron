@@ -84,6 +84,7 @@ def main():
 
     # Quality control
     if "qc" in STEPS_TO_RUN:
+        plot_qc = config["qc_config"].get("plotting", True)
         features_bed_path = os.path.join(RESOURCES_DIR, "features.bed")
         gff_path = os.path.join(RESOURCES_DIR, "DNA_sequence", "gencode.v45.transcripts.annotation.gff3")
         features_bed = utils.get_features_bed(features_bed_path, gff_path)
@@ -94,9 +95,8 @@ def main():
             mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed=features_bed)
             save_path = os.path.join(OUTPUTS_DIR, f"{project_prefix}-{sample}_qc.h5mu")
             utils.save_mudata(mudata_obj, save_path)
-        plot_qc = config["qc_config"].get("plotting", True)
-        if plot_qc:
-            utils.plot_qc_metrics(mudata_dict, OUTPUTS_DIR, project_prefix)
+            if plot_qc:
+                utils.plot_qc_metrics(mudata_obj, sample, OUTPUTS_DIR)
 
     # Filter cells by QC thresholds
     if "filter" in STEPS_TO_RUN:

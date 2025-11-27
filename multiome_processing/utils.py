@@ -228,11 +228,12 @@ def compute_qc_metrics(mudata: mu.MuData, features_bed: pd.DataFrame = None) -> 
     logging.info("Computing QC metrics for MuData")
     if "rna" in mudata.mod:
         rna = mudata.mod["rna"]
-        rna.var['mt'] = rna.var_names.str.startswith('MT-')
-        sc.pp.calculate_qc_metrics(rna, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts, pct_counts_mt
+        if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
+            rna.var['mt'] = rna.var_names.str.startswith('MT-')
+            sc.pp.calculate_qc_metrics(rna, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts, pct_counts_mt
     if "atac" in mudata.mod:
         atac = mudata.mod["atac"]
-        if atac.X.shape[1] > 0:
+        if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
             sc.pp.calculate_qc_metrics(atac, percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts
             ac.tl.nucleosome_signal(atac, n=1e6)  # adds atac.obs['nucleosome_signal']
             if features_bed is not None:
@@ -251,14 +252,16 @@ def plot_qc_metrics(mudata: mu.MuData, outdir: str, sample_name: str) -> None:
     with PdfPages(pdf_path) as pdf:
         if "rna" in mudata.mod:
             rna = mudata.mod["rna"]
-            sc.pl.violin(rna, ['nCount_RNA', 'nFeature_RNA', 'pct_counts_mt'], jitter=0.4, multi_panel=True, show=False)
-            pdf.savefig()
-            plt.close()
+            if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
+                sc.pl.violin(rna, ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'], jitter=0.4, multi_panel=True, show=False)
+                pdf.savefig()
+                plt.close()
         if "atac" in mudata.mod:
             atac = mudata.mod["atac"]
-            sc.pl.violin(atac, ['nCount_ATAC', 'nFeature_ATAC', 'nucleosome_signal', 'tss_enrichment'], jitter=0.4, multi_panel=True, show=False)
-            pdf.savefig()
-            plt.close()
+            if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
+                sc.pl.violin(atac, ['n_genes_by_counts', 'total_counts', 'nucleosome_signal', 'tss_score'], jitter=0.4, multi_panel=True, show=False)
+                pdf.savefig()
+                plt.close()
     logging.info("Saved QC metrics plots to %s", pdf_path)
 
 def filter_cells_by_qc(mudata: mu.MuData,
