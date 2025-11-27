@@ -170,14 +170,34 @@ def call_macs2_peaks(sample_dir: str, out_dir: str, macs2_path: str = "macs2"):
     # os.system(cmd)
     return out_prefix + "_peaks.narrowPeak"
 
+def get_features_bed(features_bed_path: str, gff_path: str) -> pd.DataFrame:
+    # Load features.bed if exists
+    if os.path.exists(features_bed_path):
+        logging.info("Loaded features.bed from %s", features_bed_path)
+        return pd.read_csv(
+            features_bed_path,
+            sep="\t",
+            header=None,
+            names=["Chromosome", "Start", "End", "Name", "Strand"]
+        )
+    # If not, create from GFF
+    if not os.path.exists(gff_path):
+        raise FileNotFoundError(f"GFF file not found at {gff_path}; cannot create features.bed")
+
+    logging.info("features.bed not found; generating from GFF at %s", gff_path)
+    features_bed = gff3_to_tss_features(gff_path)
+    features_bed.to_csv(features_bed_path, sep="\t", header=False, index=False)
+    logging.info("features.bed created at %s", features_bed_path)
+    
+    return features_bed
+
 def gff3_to_tss_features(gff3_file: str) -> pd.DataFrame:
     logging.info("Converting GFF3 to TSS features from %s", gff3_file)
     # Load GFF3
-    gff = pd.read_csv(
-        gff3_file, sep="\t", comment="#", header=None,
+    gff = pd.read_csv(gff3_file, sep="\t", comment="#", header=None,
         names=["chrom", "source", "feature", "start", "end", "score", "strand", "phase", "attributes"]
     )
-    
+
     # Keep only transcripts
     transcripts = gff[gff["feature"] == "transcript"].copy()
     

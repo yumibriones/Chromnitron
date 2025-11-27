@@ -34,6 +34,7 @@ def main():
  
     # Setup
     setup_config = config["setup"]
+    RESOURCES_DIR = setup_config.get("chromnitron_resources_dir", ".")
     INPUTS_DIR = setup_config.get("inputs_dir", ".")
     samplesheet_path = os.path.join(INPUTS_DIR, setup_config.get("sample_sheet", "samplesheet.csv"))
     mudata_files = setup_config.get("mudata_files", [])
@@ -56,15 +57,15 @@ def main():
         features_bed = utils.gff3_to_tss_features(gff_path) if gff_path else None
     
     # Steps to run
-    steps_to_run = config.get("steps_to_run", [])
+    STEPS_TO_RUN = config.get("STEPS_TO_RUN", [])
     
     ### Create 10X Multiome data directories from sample sheet
-    if "create_data_dirs" in steps_to_run:
+    if "create_data_dirs" in STEPS_TO_RUN:
         print("Initializing data directories based on samplesheet")
         utils.create_dirs_from_samplesheet(samplesheet, DATA_DIR)
 
     ### Create MuData objects
-    if "create_mudata" in steps_to_run:
+    if "create_mudata" in STEPS_TO_RUN:
         mudata_dict = {}
         # Create per-sample MuData objects and save intermediate files
         for sample in samples:
@@ -78,16 +79,19 @@ def main():
                 logging.exception("Error creating sample %s: %s", sample, e)
 
     # Call MACS2 peaks per sample
-    if "peak_calling" in steps_to_run:
+    if "peak_calling" in STEPS_TO_RUN:
         for sample in samples:
             sample_dir = samplesheet.loc[samplesheet["sampleName"] == sample, "path"].iloc[0]
             out_dir = os.path.join(OUTPUTS_DIR, "macs2")
             utils.call_macs2_peaks(sample_dir=sample_dir, out_dir=out_dir, macs2_path=macs2_path)
 
     # Quality control
-    if "qc" in steps_to_run:
+    if "qc" in STEPS_TO_RUN:
+        features_bed_path = os.path.join(RESOURCES_DIR, "features.bed")
+        gff_path = os.path.join(RESOURCES_DIR, "gencode.v45.transcripts.annotation.gff3")
+        features_bed = utils.get_features_bed(features_bed_path, gff_path)
         if mudata_dict is None:
-            raise RuntimeError("MuData not loaded. Run 'create' or provide --mudata_files.")
+            raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
         for sample, mudata_obj in mudata_dict.items():
             logging.info("QC stage for sample: %s", sample)
             mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed=features_bed)
@@ -98,13 +102,16 @@ def main():
             utils.plot_qc_metrics(mudata_dict, OUTPUTS_DIR, project_prefix)
 
     # Filter cells by QC thresholds
-    if "filter" in steps_to_run:
-        if mudata is None:
-            raise RuntimeError("MuData not loaded.")
-        mudata = utils.filter_cells_by_qc(mudata)
-        utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_prefix}_filtered.h5mu"))
+    if "filter" in STEPS_TO_RUN:
+        if mudata_dict is None:
+            raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
+        for sample, mudata_obj in mudata_dict.items():
+            logging.info("Filtering stage for sample: %s", sample)
+            mudata_obj = utils.filter_cells_by_qc(mudata_obj)
+            save_path = os.path.join(OUTPUTS_DIR, f"{project_prefix}-{sample}_filtered.h5mu")
+            utils.save_mudata(mudata_obj, save_path)
 
-    if "postqc" in steps_to_run:
+    if "postqc" in STEPS_TO_RUN:
         if mudata is None:
             raise RuntimeError("MuData not loaded.")
         # quick overview plots and statistics could be added here (skipping plotting code)
@@ -113,7 +120,7 @@ def main():
         mudata.mod["atac"] = atac_tfidf_lsi(mudata.mod["atac"], n_components=30)
         utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_prefix}_postqc.h5mu"))
 
-    if "clustering" in steps_to_run:
+    if "clustering" in STEPS_TO_RUN:
         if mudata is None:
             raise RuntimeError("MuData not loaded.")
         # run harmony optional
@@ -133,13 +140,13 @@ def main():
         mudata.obs["wsnn_res"] = combined_adata.obs["wsnn_res"].astype(str).values
         utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_prefix}_clustered.h5mu"))
     
-    if "merge" in steps_to_run:
+    if "merge" in STEPS_TO_RUN:
         # merge behavior already handled in create; here we just ensure final object saved
         if mudata is None:
             raise RuntimeError("MuData not loaded.")
         utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_prefix}_merged.h5mu"))
 
-    if "link_peaks_to_genes" in steps_to_run:
+    if "link_peaks_to_genes" in STEPS_TO_RUN:
         if mudata is None:
             raise RuntimeError("MuData not loaded.")
         corr_df = utils.link_peaks_to_genes(mudata)
@@ -148,7 +155,7 @@ def main():
             corr_df.to_csv(out_csv)
             logging.info("Wrote peak-gene correlation scaffold to %s", out_csv)
 
-    logging.info("Pipeline steps completed: %s", steps_to_run)
+    logging.info("Pipeline steps completed: %s", STEPS_TO_RUN)
 
 
 if __name__ == "__main__":

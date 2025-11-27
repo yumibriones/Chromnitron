@@ -1,5 +1,6 @@
 setup:
-  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/PsO_multiome/muon_multiome_test  # Path to input data directory
+  chromnitron_resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # Path to input resources
+  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_multiome_twins
   sample_sheet: samplesheet.csv  # Required: CSV file with columns: sampleName,path (path to 10x multiome data directory)
   mudata_files: # Optional: path to existing MuData file/s to start from
     - /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/PsO_multiome/muon_code/outputs/muon_multiome-Rep1-created.h5mu 
@@ -23,8 +24,6 @@ peak_calling_config:
   grouping_var:  # Grouping variable for peak calling algorithm
 
 qc_config:
-  gff_path: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/Chromnitron_differential/input_data/input_resources/DNA_sequence/gencode.v45.transcripts.annotation.gff3  # Path to GFF3 annotation file to convert to BED, or empty to use default
-  features_bed_path: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/Chromnitron_differential/input_data/input_resources/DNA_sequence/gencode.v45.annotation.features.bed  # Path to BED file with genomic features, or empty to use default
   qc_sheet_path:  # Optional: Path to CSV file containing clusters to remove per sample
   split_by_sample: False  # Whether to split QC metrics by sample
   plotting: True  # Whether to generate QC plots
