@@ -136,7 +136,7 @@ def read_10x_multiome(sample_dir: str, sample_name: str) -> mu.MuData:
     else:
         logging.warning("Fragments file not found for sample %s: %s", sample_name, fragments_path)
 
-    mudata.obs_names = [f"{sample_name}_{bc}" for bc in mudata.obs_names]
+    # mudata.obs_names = [f"{sample_name}_{bc}" for bc in mudata.obs_names]
     mudata.obs["sample"] = sample_name
     # Ensure layers are dicts to avoid write_h5mu error
     for mod in mudata.mod.values():
@@ -238,37 +238,71 @@ def compute_qc_metrics(mudata: mu.MuData, features_bed: pd.DataFrame = None) -> 
             ac.tl.nucleosome_signal(atac, n=1e6)  # adds atac.obs['nucleosome_signal']
             if features_bed is not None:
                 logging.info("Computing TSS enrichment using provided features bed")
-                ac.tl.tss_enrichment(atac, features=features_bed, n_tss=1000)  # adds atac.obs['tss_enrichment']
+                tss = ac.tl.tss_enrichment(atac, features=features_bed, n_tss=1000)  # adds atac.obs['tss_enrichment']
             else:
                 logging.info("No features bed provided; skipping TSS enrichment calculation")
-    return mudata
+    return mudata, tss
 
-def plot_qc_metrics(mudata: mu.MuData, outdir: str, sample_name: str) -> None:
+def plot_qc_metrics(mudata: mu.MuData, tss, output_dir: str, sample_name: str) -> None:
     logging.info("Plotting QC metrics for sample %s", sample_name)
     # Make multipage PDF with QC plots
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
-    pdf_path = os.path.join(outdir, f"{sample_name}_qc_metrics.pdf")
+    
+    pdf_path = os.path.join(output_dir, f"{sample_name}_qc_metrics.pdf")
     with PdfPages(pdf_path) as pdf:
+
+        # RNA QC
         if "rna" in mudata.mod:
             rna = mudata.mod["rna"]
             if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
-                sc.pl.violin(rna, ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'], jitter=0.4, multi_panel=True, show=False)
-                pdf.savefig()
-                plt.close()
+                g = sc.pl.violin(rna,
+                                   ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'],
+                                   jitter=0.4,
+                                   multi_panel=True,
+                                   show=False)
+                pdf.savefig(g.fig)
+                plt.close(g.fig)
+
+        # ATAC QC
         if "atac" in mudata.mod:
             atac = mudata.mod["atac"]
             if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
-                sc.pl.violin(atac, ['n_genes_by_counts', 'total_counts', 'nucleosome_signal', 'tss_score'], jitter=0.4, multi_panel=True, show=False)
-                pdf.savefig()
-                plt.close()
+                # Violin
+                g = sc.pl.violin(atac,
+                                   ['n_genes_by_counts', 'total_counts', 'nucleosome_signal', 'tss_score'],
+                                   jitter=0.4,
+                                   multi_panel=True,
+                                   show=False)
+                pdf.savefig(g.fig)
+                plt.close(g.fig)
+
+                # # Nucleosome histogram
+                # fig, ax = plt.subplots()
+                # mu.pl.histogram(atac, "nucleosome_signal", kde=False, ax=ax)
+                # pdf.savefig(fig)
+                # plt.close(fig)
+
+                # # TSS enrichment
+                # if tss is not None:
+                #     fig = ac.pl.tss_enrichment(tss)
+                #     pdf.savefig(fig)
+                #     plt.close(fig)
+
     logging.info("Saved QC metrics plots to %s", pdf_path)
 
 def filter_cells_by_qc(mudata: mu.MuData,
-                       min_nCount_RNA: int = 1000,
-                       max_nCount_RNA: int = 30000,
-                       min_nFeature_RNA: int = 500,
-                       max_percent_mt: float = 20.0):
+                       min_n_genes_by_counts_rna: int = 500,
+                       max_n_genes_by_counts_rna: int = 500,
+                       min_total_counts_rna: int = 1000,
+                       max_total_counts_rna: int = 30000,
+                       max_percent_mt: float = 20.0,
+                       min_n_genes_by_counts_atac: int = 500,
+                       max_n_genes_by_counts_atac: int = 500,
+                       min_total_counts_atac: int = 1000,
+                       max_total_counts_atac: int = 30000,
+                       max_nucleosome_signal_atac: float = 4.0,
+                       min_tss_score_atac: float = 2.0):
     """
     Simple QC filters applied to RNA obs columns. percent.mt requires MT genes in var names.
     """
@@ -485,8 +519,8 @@ def link_peaks_to_genes(mudata: mu.MuData, distance: int = 250000):
     corr_df = pd.Series(corr).sort_values(ascending=False).to_frame("corr_with_activity")
     return corr_df
 
-
-def save_mudata(mudata: mu.MuData, path: str):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    logging.info("Saving MuData to %s", path)
-    mudata.write_h5mu(path)
+def save_mudata(mudata: mu.MuData, filename: str, output_dir: str):
+    save_path = os.path.join(output_dir, filename)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    logging.info("Saving MuData to %s", save_path)
+    mudata.write_h5mu(save_path)

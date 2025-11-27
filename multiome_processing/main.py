@@ -69,8 +69,8 @@ def main():
             try:
                 mudata_obj = utils.read_10x_multiome(sample_dir, sample)
                 mudata_dict[sample] = mudata_obj
-                save_path = os.path.join(OUTPUTS_DIR, f"{project_prefix}-{sample}.h5mu")
-                utils.save_mudata(mudata_obj, save_path)
+                filename = f"{project_prefix}-{sample}.h5mu"
+                utils.save_mudata(mudata_obj, filename, OUTPUTS_DIR)
             except Exception as e:
                 logging.exception("Error creating sample %s: %s", sample, e)
 
@@ -92,11 +92,12 @@ def main():
             raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
         for sample, mudata_obj in mudata_dict.items():
             logging.info("QC stage for sample: %s", sample)
-            mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed=features_bed)
-            save_path = os.path.join(OUTPUTS_DIR, f"{project_prefix}-{sample}_qc.h5mu")
-            utils.save_mudata(mudata_obj, save_path)
+            mudata_obj, tss = utils.compute_qc_metrics(mudata_obj, features_bed=features_bed)
+            filename = f"{project_prefix}-{sample}_qc.h5mu"
+            utils.save_mudata(mudata_obj, filename, OUTPUTS_DIR)
+            # breakpoint()
             if plot_qc:
-                utils.plot_qc_metrics(mudata_obj, sample, OUTPUTS_DIR)
+                utils.plot_qc_metrics(mudata_obj, tss, sample, OUTPUTS_DIR)
 
     # Filter cells by QC thresholds
     if "filter" in STEPS_TO_RUN:

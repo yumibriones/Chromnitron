@@ -10,7 +10,7 @@ setup:
   
 steps_to_run:  # Define the steps of the pipeline to run, in order (comment out steps to skip)
   # - create_data_dirs
-  # - create_mudata
+  - create_mudata
   # - peak_calling
   - qc
   # - postqc
