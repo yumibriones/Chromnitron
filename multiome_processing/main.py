@@ -34,7 +34,7 @@ def main():
  
     # Setup
     setup_config = config["setup"]
-    RESOURCES_DIR = setup_config.get("chromnitron_resources_dir", ".")
+    RESOURCES_DIR = setup_config.get("resources_dir", ".")
     INPUTS_DIR = setup_config.get("inputs_dir", ".")
     samplesheet_path = os.path.join(INPUTS_DIR, setup_config.get("sample_sheet", "samplesheet.csv"))
     mudata_files_list = setup_config.get("mudata_files") or []
@@ -76,6 +76,7 @@ def main():
 
     # Call MACS2 peaks per sample
     if "peak_calling" in STEPS_TO_RUN:
+        macs2_path = None # TODO: Fix
         for sample in samples:
             sample_dir = samplesheet.loc[samplesheet["sampleName"] == sample, "path"].iloc[0]
             out_dir = os.path.join(OUTPUTS_DIR, "macs2")
@@ -84,7 +85,7 @@ def main():
     # Quality control
     if "qc" in STEPS_TO_RUN:
         features_bed_path = os.path.join(RESOURCES_DIR, "features.bed")
-        gff_path = os.path.join(RESOURCES_DIR, "gencode.v45.transcripts.annotation.gff3")
+        gff_path = os.path.join(RESOURCES_DIR, "DNA_sequence", "gencode.v45.transcripts.annotation.gff3")
         features_bed = utils.get_features_bed(features_bed_path, gff_path)
         if mudata_dict is None:
             raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")

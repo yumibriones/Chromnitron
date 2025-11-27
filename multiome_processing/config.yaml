@@ -9,9 +9,9 @@ setup:
   project_prefix: muon_twins  # Prefix for project files
   
 steps_to_run:  # Define the steps of the pipeline to run, in order (comment out steps to skip)
-  - create_data_dirs
-  - create_mudata
-  - peak_calling
+  # - create_data_dirs
+  # - create_mudata
+  # - peak_calling
   - qc
   # - postqc
   # - clustering
