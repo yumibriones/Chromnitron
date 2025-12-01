@@ -1,12 +1,11 @@
 setup:
   resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # Path to input resources
-  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_twins
+  inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs  # Path to input data directories
   sample_sheet: samplesheet.csv  # Required: CSV file with columns: sampleName,path (path to 10x multiome data directory)
   mudata_files: # Optional: Names of existing MuData files, should be in base_project_dir/outputs
     - Rep1_qc.h5mu
     - Rep2_qc.h5mu
-  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs
-  project_name: muon_twins  # Name of subfolder to create in base_project_dir
+  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs, will be created if does not exist
   
 # Define the steps of the pipeline to run, in order (comment out steps to skip)
 steps_to_run:  
@@ -17,7 +16,7 @@ steps_to_run:
   - filter
   # - postqc
   # - cluster
-  # - merge
+  # - merge_mudata
   # - link_peaks_to_genes
   # - footprint
 

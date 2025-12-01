@@ -29,32 +29,30 @@ import utils
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-def main():    
-    with open("config.yaml", 'r') as f:
+def main(config_path: str = "config.yaml"):    
+    with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
  
-    # Pull from config
     setup_config = config["setup"]
-    samplesheet_path = os.path.join(INPUTS_DIR, setup_config.get("sample_sheet", "samplesheet.csv"))
-    mudata_files_list = setup_config.get("mudata_files") or []
-    project_name = setup_config.get("project_name", "muon_multiome")
 
     # Set up directories
     RESOURCES_DIR = setup_config.get("resources_dir", ".")
     INPUTS_DIR = setup_config.get("inputs_dir", ".")
     BASE_PROJECT_DIR = setup_config.get("base_project_dir", "output")
 
-    PROJECT_DIR = os.path.join(BASE_PROJECT_DIR, project_name)
-    OUTPUTS_DIR = os.path.join(PROJECT_DIR, "outputs")
-    DATA_DIR = os.path.join(PROJECT_DIR, "data/raw")
+    OUTPUTS_DIR = os.path.join(BASE_PROJECT_DIR, "outputs")
+    DATA_DIR = os.path.join(BASE_PROJECT_DIR, "data/raw")
 
-    for d in [PROJECT_DIR, OUTPUTS_DIR, DATA_DIR]:
+    for d in [BASE_PROJECT_DIR, OUTPUTS_DIR, DATA_DIR]:
         os.makedirs(d, exist_ok=True)
 
     # Load inputs
+    samplesheet_path = os.path.join(INPUTS_DIR, setup_config.get("sample_sheet", "samplesheet.csv"))
     samplesheet = pd.read_csv(samplesheet_path, dtype=str)
     samples = samplesheet["sampleName"].tolist()
+    mudata_files_list = setup_config.get("mudata_files") or []
     mudata_list = utils.read_mudata_list([os.path.join(OUTPUTS_DIR, f) for f in mudata_files_list]) if mudata_files_list else None
+    # souporcelldfs = 
     
     # Steps to run
     STEPS_TO_RUN = config.get("steps_to_run", [])
@@ -64,10 +62,9 @@ def main():
         print("Initializing data directories based on samplesheet")
         utils.create_dirs_from_samplesheet(samplesheet, DATA_DIR)
 
-    # Create MuData objects
+    ### create_mudata: Create and save MuData objects per sample in sample sheet
     if "create_mudata" in STEPS_TO_RUN:
         mudata_list = {}
-        # Create per-sample MuData objects and save intermediate files
         for sample in samples:
             sample_dir = os.path.join(DATA_DIR, sample)
             try:
@@ -155,8 +152,8 @@ def main():
         mudata.obs["wsnn_res"] = combined_adata.obs["wsnn_res"].astype(str).values
         utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_name}_clustered.h5mu"))
     
-    ### merge: Merge all samples into single MuData object
-    if "merge" in STEPS_TO_RUN:
+    ### merge_mudata: Merge all samples into single MuData object
+    if "merge_mudata" in STEPS_TO_RUN:
         # merge behavior already handled in create; here we just ensure final object saved
         if mudata is None:
             raise RuntimeError("MuData not loaded.")
