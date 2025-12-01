@@ -19,7 +19,7 @@ setup_logging()
 
 md.set_options(pull_on_update=False)
 
-def read_mudata_dict(mudata_files: list) -> dict:
+def read_mudata_list(mudata_files: list) -> dict:
     """
     Read multiple MuData files into a dictionary.
 
@@ -29,13 +29,13 @@ def read_mudata_dict(mudata_files: list) -> dict:
     Returns
     - dict mapping sample names (derived from filenames) to MuData objects
     """
-    mudata_dict = {}
+    mudata_list = {}
     for path in mudata_files:
-        sample_name = os.path.splitext(os.path.basename(path))[0]
-        logging.info("Loading MuData for sample %s from %s", sample_name, path)
+        logging.info("Loading MuData from %s", path)
         mudata = mu.read_h5mu(path)
-        mudata_dict[sample_name] = mudata
-    return mudata_dict
+        sample_name = mudata.obs["sample"].iloc[0]
+        mudata_list[sample_name] = mudata
+    return mudata_list
 
 def create_dirs_from_samplesheet(samplesheet: pd.DataFrame, raw_out_base: str = "data/raw") -> None:
     """
@@ -146,8 +146,8 @@ def read_10x_multiome(sample_dir: str, sample_name: str) -> mu.MuData:
                  sample_name, mudata.n_obs, mudata.mod["rna"].n_vars, mudata.mod["atac"].n_vars)
     return mudata
 
-def merge_mudata_dict(mudata_dict: dict) -> MuData:
-    mudata = md.concat(list(mudata_dict.values()), join="outer", label="sample", keys=list(mudata_dict.keys()))
+def merge_mudata_list(mudata_list: dict) -> MuData:
+    mudata = md.concat(list(mudata_list.values()), join="outer", label="sample", keys=list(mudata_list.keys()))
     return mudata
 
 def call_macs2_peaks(sample_dir: str, out_dir: str, macs2_path: str = "macs2"):
@@ -229,25 +229,58 @@ def compute_qc_metrics(mudata: mu.MuData, features_bed: pd.DataFrame = None) -> 
     if "rna" in mudata.mod:
         rna = mudata.mod["rna"]
         if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
-            rna.var['mt'] = rna.var_names.str.startswith('MT-')
-            sc.pp.calculate_qc_metrics(rna, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts, pct_counts_mt
+            # Check if metrics already exist
+            if not all(metric in rna.obs.columns for metric in ['n_genes_by_counts', 'total_counts', 'pct_counts_mt']):
+                rna.var['mt'] = rna.var_names.str.startswith('MT-')
+                sc.pp.calculate_qc_metrics(rna, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts, pct_counts_mt
     if "atac" in mudata.mod:
         atac = mudata.mod["atac"]
         if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
-            sc.pp.calculate_qc_metrics(atac, percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts
-            ac.tl.nucleosome_signal(atac, n=1e6)  # adds atac.obs['nucleosome_signal']
-            if features_bed is not None:
-                logging.info("Computing TSS enrichment using provided features bed")
-                tss = ac.tl.tss_enrichment(atac, features=features_bed, n_tss=1000)  # adds atac.obs['tss_enrichment']
+            # Check if metrics already exist
+            if not all(metric in atac.obs.columns for metric in ['n_genes_by_counts', 'total_counts']):
+                sc.pp.calculate_qc_metrics(atac, percent_top=None, log1p=False, inplace=True)  # n_genes_by_counts, total_counts
+                ac.tl.nucleosome_signal(atac, n=1e6)  # adds atac.obs['nucleosome_signal']
+                if features_bed is not None:
+                    logging.info("Computing TSS enrichment using provided features bed")
+                    tss = ac.tl.tss_enrichment(atac, features=features_bed, n_tss=1000)  # adds atac.obs['tss_enrichment']
             else:
                 logging.info("No features bed provided; skipping TSS enrichment calculation")
-    return mudata, tss
 
-def plot_qc_metrics(mudata: mu.MuData, tss, output_dir: str, sample_name: str) -> None:
+    return mudata
+
+def summarize_qc_metrics(mudata: mu.MuData) -> pd.DataFrame:
+    # output num_cells, num_features, qc metrics (max, min, mean, median, stdev)
+    metrics_summary = {}
+    metrics_summary = {
+        "num_cells": sum(mod.n_obs for mod in mudata.mod.values()),
+        "num_features": sum(mod.n_vars for mod in mudata.mod.values())
+    }
+    for mod_name, mod in mudata.mod.items():
+        metrics_summary[mod_name] = {}
+        for col in mod.obs.columns:
+            if np.issubdtype(mod.obs[col].dtype, np.number):
+                metrics_summary[mod_name][col] = {
+                    "min": float(mod.obs[col].min()),
+                    "max": float(mod.obs[col].max()),
+                    "mean": float(mod.obs[col].mean()),
+                    "median": float(mod.obs[col].median()),
+                    "std": float(mod.obs[col].std()),
+                }
+    # metrics_df = pd.DataFrame.from_dict({(i,j): metrics_summary[i][j] 
+    #                                      for i in metrics_summary.keys() 
+    #                                      for j in metrics_summary[i].keys()}, orient='index')
+
+    logging.info("QC metrics summary:\n%s", metrics_summary)
+    
+    return metrics_summary
+
+def plot_qc_metrics(mudata: mu.MuData, output_dir: str, sample_name: str) -> None:
     logging.info("Plotting QC metrics for sample %s", sample_name)
     # Make multipage PDF with QC plots
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
+
+    sc.set_figure_params(figsize=(6, 12))
     
     pdf_path = os.path.join(output_dir, f"{sample_name}_qc_metrics.pdf")
     with PdfPages(pdf_path) as pdf:
@@ -257,8 +290,18 @@ def plot_qc_metrics(mudata: mu.MuData, tss, output_dir: str, sample_name: str) -
             rna = mudata.mod["rna"]
             if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
                 g = sc.pl.violin(rna,
-                                   ['n_genes_by_counts', 'total_counts', 'pct_counts_mt'],
-                                   jitter=0.4,
+                                   ['n_genes_by_counts', 'total_counts'],
+                                   log=True,
+                                   stripplot=False,
+                                   multi_panel=True,
+                                   show=False)
+                pdf.savefig(g.fig)
+                plt.close(g.fig)
+
+                g = sc.pl.violin(rna,
+                                   ['pct_counts_mt'],
+                                   log=False,
+                                   stripplot=False,
                                    multi_panel=True,
                                    show=False)
                 pdf.savefig(g.fig)
@@ -270,10 +313,20 @@ def plot_qc_metrics(mudata: mu.MuData, tss, output_dir: str, sample_name: str) -
             if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
                 # Violin
                 g = sc.pl.violin(atac,
-                                   ['n_genes_by_counts', 'total_counts', 'nucleosome_signal', 'tss_score'],
-                                   jitter=0.4,
+                                   ['n_genes_by_counts', 'total_counts'],
+                                   log=True,
+                                   stripplot=False,
                                    multi_panel=True,
                                    show=False)
+                pdf.savefig(g.fig)
+                plt.close(g.fig)
+
+                g = sc.pl.violin(atac,
+                                    ['nucleosome_signal', 'tss_score'],
+                                    log=False,
+                                    stripplot=False,
+                                    multi_panel=True,
+                                    show=False)
                 pdf.savefig(g.fig)
                 plt.close(g.fig)
 
@@ -292,41 +345,33 @@ def plot_qc_metrics(mudata: mu.MuData, tss, output_dir: str, sample_name: str) -
     logging.info("Saved QC metrics plots to %s", pdf_path)
 
 def filter_cells_by_qc(mudata: mu.MuData,
-                       min_n_genes_by_counts_rna: int = 500,
-                       max_n_genes_by_counts_rna: int = 500,
-                       min_total_counts_rna: int = 1000,
-                       max_total_counts_rna: int = 30000,
+                       modality: str = "rna",
+                       min_n_genes_by_counts: int = 500,
+                       min_total_counts: int = 1000,
+                       max_total_counts: int = 30000,
                        max_percent_mt: float = 20.0,
-                       min_n_genes_by_counts_atac: int = 500,
-                       max_n_genes_by_counts_atac: int = 500,
-                       min_total_counts_atac: int = 1000,
-                       max_total_counts_atac: int = 30000,
-                       max_nucleosome_signal_atac: float = 4.0,
-                       min_tss_score_atac: float = 2.0):
-    """
-    Simple QC filters applied to RNA obs columns. percent.mt requires MT genes in var names.
-    """
-    logging.info("Filtering cells by RNA QC thresholds")
-    rna = mudata.mod["rna"]
-    # percent.mt: compute if MT present
-    mt_genes = [g for g in rna.var_names if g.upper().startswith("MT-") or g.upper().startswith("MT")]
-    if len(mt_genes) > 0:
-        rna.obs["percent_mt"] = np.array(rna[:, mt_genes].X.sum(axis=1)).ravel() / (rna.obs["nCount_RNA"] + 1e-9) * 100
-    else:
-        rna.obs["percent_mt"] = 0.0
-
-    keep_rna = (
-        (rna.obs["nCount_RNA"] >= min_nCount_RNA) &
-        (rna.obs["nCount_RNA"] <= max_nCount_RNA) &
-        (rna.obs["nFeature_RNA"] >= min_nFeature_RNA) &
-        (rna.obs["percent_mt"] <= max_percent_mt)
-    )
-    kept_cells = rna.obs_names[keep_rna.values]
-    logging.info("Keeping %d / %d cells after RNA QC", kept_cells.size, rna.n_obs)
-
-    # Subset muData to kept cells
-    mudata = mudata[kept_cells.tolist(), :]
-    mudata.obs_names_make_unique()
+                       max_nucleosome_signal: float = 2.0,
+                       min_tss_score: float = 1.0):
+    logging.info("Filtering cells by QC metrics for modality: %s", modality)
+    if modality not in mudata.mod:
+        logging.warning("Modality %s not found in MuData; skipping filtering", modality)
+        return mudata
+    mod = mudata.mod[modality]
+    initial_n_cells = mod.n_obs
+    mask = np.ones(mod.n_obs, dtype=bool)
+    if "n_genes_by_counts" in mod.obs.columns:
+        mask &= (mod.obs["n_genes_by_counts"] >= min_n_genes_by_counts)
+    if "total_counts" in mod.obs.columns:
+        mask &= (mod.obs["total_counts"] >= min_total_counts) & (mod.obs["total_counts"] <= max_total_counts)
+    if modality == "rna" and "pct_counts_mt" in mod.obs.columns:
+        mask &= (mod.obs["pct_counts_mt"] <= max_percent_mt)
+    if modality == "atac":
+        if "nucleosome_signal" in mod.obs.columns:
+            mask &= (mod.obs["nucleosome_signal"] <= max_nucleosome_signal)
+        if "tss_enrichment" in mod.obs.columns:
+            mask &= (mod.obs["tss_enrichment"] >= min_tss_score)
+    mod._inplace_subset_obs(mask)
+    logging.info("Filtered cells from %d to %d based on QC", initial_n_cells, mod.n_obs)
     return mudata
 
 def preprocess_rna(mudata: mu.MuData, n_top_genes: int = 2000):
@@ -520,7 +565,7 @@ def link_peaks_to_genes(mudata: mu.MuData, distance: int = 250000):
     return corr_df
 
 def save_mudata(mudata: mu.MuData, filename: str, output_dir: str):
-    save_path = os.path.join(output_dir, filename)
+    save_path = os.path.join(output_dir, f"{filename}.h5mu")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     logging.info("Saving MuData to %s", save_path)
     mudata.write_h5mu(save_path)

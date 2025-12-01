@@ -3,23 +3,27 @@ setup:
   inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/inputs/muon_twins
   sample_sheet: samplesheet.csv  # Required: CSV file with columns: sampleName,path (path to 10x multiome data directory)
   mudata_files: # Optional: Names of existing MuData files, should be in base_project_dir/outputs
-    - muon_twins-Rep1.h5mu
-    - muon_twins-Rep2.h5mu
-  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/outputs/muon_twins  # Base directory for project outputs
-  project_prefix: muon_twins  # Prefix for project files
+    - Rep1_qc.h5mu
+    - Rep2_qc.h5mu
+  base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs
+  project_name: muon_twins  # Name of subfolder to create in base_project_dir
   
-steps_to_run:  # Define the steps of the pipeline to run, in order (comment out steps to skip)
+# Define the steps of the pipeline to run, in order (comment out steps to skip)
+steps_to_run:  
   # - create_data_dirs
-  - create_mudata
-  # - peak_calling
-  - qc
+  # - create_mudata
+  # - call_peaks
+  - qc_check
+  - filter
   # - postqc
-  # - clustering
+  # - cluster
   # - merge
   # - link_peaks_to_genes
-  # - footprinting
+  # - footprint
 
-peak_calling_config:
+# Below are step-specific configurations
+
+call_peaks_config:
   macs2_path:  # Path to MACS2 environment
   grouping_var:  # Grouping variable for peak calling algorithm
 
@@ -31,22 +35,22 @@ qc_config:
 postqc_config:
   run_harmony: True  # Whether to run Harmony batch correction after QC
 
-filtering_config:
-  max_mito_frac: 0.2  # Maximum mitochondrial fraction for filtering
-  min_genes: 200  # Minimum number of genes for filtering
-  max_genes: 6000  # Maximum number of genes for filtering
-  min_counts: 500  # Minimum number of counts for filtering
-  max_counts: 50000  # Maximum number of counts for filtering
-  min_peaks: 1000  # Minimum number of ATAC peaks for filtering
-  max_peaks: 50000  # Maximum number of ATAC peaks for filtering
+filter_config:
+  rna:
+    min_n_genes_by_counts: 500
+    min_total_counts: 1000
+    max_total_counts: 25000
+    max_percent_mt: 20.0
+  atac:
+    min_n_genes_by_counts: 500
+    min_total_counts: 5000
+    max_total_counts: 70000
+    max_nucleosome_signal: 2.0
+    min_tss_score: 1.0
+  plotting: True  # Whether to generate QC plots after filtering
   
-footprinting_config:
+footprint_config:
   footprint_peaks_path:  # Path to TXT file containing ATAC peaks to run footprinting on
-    
-output:
-  outdir: outputs
-  
-
 
 
 
