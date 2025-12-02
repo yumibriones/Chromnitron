@@ -3,6 +3,8 @@ import shutil
 import logging
 import pandas as pd
 import numpy as np
+import gzip
+import subprocess
 
 import muon as mu
 from muon import atac as ac
@@ -193,6 +195,74 @@ def add_donor_metadata(mudata: mu.MuData, souporcell_df: pd.DataFrame) -> dict:
 
     return mudata
 
+def merge_fragments_tsv(samples: list, data_dir: str, merged_path: str) -> None:
+    """
+    Merge fragments.tsv.gz from multiple samples into a single merged_fragments.tsv.gz.
+    Keeps all columns, skips comment lines starting with '#' and empty lines.
+    """
+    os.makedirs(os.path.dirname(merged_path), exist_ok=True)
+    logging.info("Merging %d fragment files into %s", len(samples), merged_path)
+
+    with gzip.open(merged_path, 'wt') as fout:
+        for sample in samples:
+            frag_src = os.path.join(data_dir, sample, "fragments.tsv.gz")
+            if not os.path.exists(frag_src):
+                logging.warning("Fragments file not found for sample %s: %s", sample, frag_src)
+                continue
+            logging.info("Processing sample %s", sample)
+
+            with gzip.open(frag_src, 'rt') as fin:
+                for line in fin:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    fout.write(line + "\n")
+
+    logging.info("Merged fragments.tsv.gz created: %s", merged_path)
+
+def subset_fragments_tsv(fragments_path: str, barcodes: set, output_path: str) -> None:
+    """
+    Subset a fragments.tsv.gz file to only include fragments with barcodes in the provided set.
+    Writes to output_path as fragments_subset.tsv.gz.
+    """
+    logging.info("Subsetting fragments from %s to %s", fragments_path, output_path)
+    with gzip.open(fragments_path, 'rt') as fin, gzip.open(output_path, 'wt') as fout:
+        for line in fin:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 4:
+                continue
+            barcode = fields[3]
+            if barcode in barcodes:
+                fout.write(line + "\n")
+    logging.info("Subsetted fragments written to %s", output_path)
+
+def call_peaks(fragments_path: str, output_dir: str, filename: str) -> None:
+    """
+    Call peaks on a merged fragments.tsv.gz file using MACS3 (paired-end / BEDPE).
+    Peaks are saved in objects_dir with project_prefix.
+    """
+    logging.info("Calling peaks for %s using MACS3", filename)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    cmd = [
+        "macs3", "callpeak",
+        "-t", fragments_path,
+        "-f", "BEDPE",  # for paired end
+        "-n", filename,
+        "--outdir", output_dir,
+        "-g", "hs",
+        "--nomodel",
+        "--shift", "-100",
+        "--extsize", "200",
+        "-q", "0.01"
+    ]
+    
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
 def get_features_bed(features_bed_path: str, gff_path: str) -> pd.DataFrame:
     """
     Load features.bed if exists; otherwise create from GFF.
@@ -338,6 +408,7 @@ def plot_qc_metrics(mudata: mu.MuData, filepath: str, grouping_var: str = "sampl
         if "rna" in mudata.mod:
             rna = mudata.mod["rna"]
             metrics_to_plot = ['n_genes_by_counts', 'total_counts', 'pct_counts_mt']
+            log_plot = [True, True, False]
             if rna.X.shape[0] > 0 and rna.X.shape[1] > 0:
                 for metric in metrics_to_plot:
                     if metric in rna.obs.columns:
@@ -345,10 +416,10 @@ def plot_qc_metrics(mudata: mu.MuData, filepath: str, grouping_var: str = "sampl
                         sc.pl.violin(rna,
                                      metric,
                                      groupby=grouping_var,
-                                     log=False,
+                                     log=log_plot[metrics_to_plot.index(metric)],
                                      stripplot=False,
                                      show=False)
-                        plt.title(f"RNA QC: {metric} by {grouping_var}", fontsize=14)                    
+                        plt.title(f"RNA QC: {metric} by {grouping_var}", fontsize=14)                
                         plt.tight_layout()
                         pdf.savefig(plt.gcf())
                         plt.close(plt.gcf())
@@ -357,6 +428,7 @@ def plot_qc_metrics(mudata: mu.MuData, filepath: str, grouping_var: str = "sampl
         if "atac" in mudata.mod:
             atac = mudata.mod["atac"]
             metrics_to_plot = ['n_genes_by_counts', 'total_counts', 'nucleosome_signal', 'tss_score']
+            log_plot = [True, True, False, False]
             if atac.X.shape[0] > 0 and atac.X.shape[1] > 0:
                 for metric in metrics_to_plot:
                     if metric in atac.obs.columns:
@@ -364,15 +436,13 @@ def plot_qc_metrics(mudata: mu.MuData, filepath: str, grouping_var: str = "sampl
                         sc.pl.violin(atac,
                                      metric,
                                      groupby=grouping_var,
-                                     log=False,
+                                     log=log_plot[metrics_to_plot.index(metric)],
                                      stripplot=False,
                                      show=False)
                         plt.title(f"ATAC QC: {metric} by {grouping_var}", fontsize=14)
                         plt.tight_layout()
                         pdf.savefig(plt.gcf())
                         plt.close(plt.gcf())
-
-    logging.info("Saved QC metrics plots to %s", pdf_path)
 
 def filter_cells_by_qc(
     mudata: mu.MuData,

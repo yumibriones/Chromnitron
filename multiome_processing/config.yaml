@@ -2,20 +2,20 @@ setup:
   resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # (Required) Path to input resources
   inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs  # (Required) Path to input data directories, must exist
   sample_sheet: samplesheet.csv  # (Required) Name of CSV file in inputs_dir with columns: sampleName, path (to 10x multiome folder), (optional) SoupOrCellDF
-  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1_by_donor_postqc.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
+  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1_with_donors.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
   base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs, will be created if does not exist
   project_prefix: Pool1  # Prefix for naming files
   
 # Define the steps of the pipeline to run, in order (comment out steps to skip)
 steps_to_run:  
-  # - create_data_dirs
+  # - initialize
   # - create_mudata
   # - add_donor_metadata
-  # - call_peaks
+  - call_peaks
   # - qc
   # - filter
   # - postqc
-  - cluster
+  # - cluster
   # - link_peaks_to_genes
   # - footprint
   # - differential_analysis
@@ -23,12 +23,11 @@ steps_to_run:
 # Below are step-specific configurations
 
 call_peaks_config:
-  macs2_path:  # Path to MACS2 environment
   grouping_var:  # Grouping variable for peak calling algorithm
 
 qc_config:
   qc_sheet_path:  # (Optional) Path to CSV file containing clusters to remove per sample
-  grouping_var: donor # Grouping variable for QC summary and plots
+  grouping_var: sample # Grouping variable for QC summary and plots
   plotting: True  # Whether to generate QC plots
 
 filter_config:
@@ -44,12 +43,12 @@ filter_config:
     max_total_counts: 70000
     max_nucleosome_signal: 2.0
     min_tss_score: 1.0
-  grouping_var: donor  # Grouping variable for QC summary and plots
+  grouping_var: sample  # Grouping variable for QC summary and plots
   plotting: True  # Whether to generate QC plots after filtering
 
 postqc_config:
   run_harmony: True  # Whether to run Harmony batch correction after QC
-  grouping_var: donor  # Grouping variable for post-QC summary and plots
+  grouping_var: sample  # Grouping variable for post-QC summary and plots
   plotting: True  # Whether to generate post-QC plots
 
 cluster_config:
@@ -58,7 +57,7 @@ cluster_config:
     min_dist: 0.5  # Minimum distance for UMAP
     resolution: 0.5  # Resolution for clustering
     random_state: 9  # Random state for reproducibility
-  grouping_var: rna_leiden  # Grouping variable for cluster plots
+  grouping_var: cell_type  # Grouping variable for cluster plots
   plotting: True  # Whether to generate cluster plots
 
 

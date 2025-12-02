@@ -60,11 +60,13 @@ def main(config_path: str = "config.yaml"):
     ### Steps to run
     STEPS_TO_RUN = config.get("steps_to_run", [])
     
-    ### create_data_dirs: Create 10X Multiome data directories from sample sheet
-    if "create_data_dirs" in STEPS_TO_RUN:
-        print("Initializing data directories based on samplesheet")
+    ### initialize: Create 10X Multiome data dirs and prepare inputs for donor demultiplexing/peak calling
+    if "initialize" in STEPS_TO_RUN:
+        print("Initializing data dirs and inputs from samplesheet")
         utils.create_dirs_from_samplesheet(samplesheet, DATA_DIR)
         utils.merge_sourporcell_dfs(samplesheet, INPUTS_DIR)
+        merged_fragments_path = os.path.join(INPUTS_DIR, "merged_fragments.tsv.gz")
+        # utils.merge_fragments_tsv(samples, DATA_DIR, merged_fragments_path)
 
     ### create_mudata: Create and save MuData objects per sample in sample sheet
     if "create_mudata" in STEPS_TO_RUN:
@@ -78,7 +80,7 @@ def main(config_path: str = "config.yaml"):
                 features_bed_path = os.path.join(RESOURCES_DIR, "features.bed")
                 gff_path = os.path.join(RESOURCES_DIR, "DNA_sequence", "gencode.v45.transcripts.annotation.gff3")
                 features_bed = utils.get_features_bed(features_bed_path, gff_path)
-                mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed=features_bed)
+                mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed)
             except Exception as e:
                 logging.exception("Error creating sample %s: %s", sample, e)
         # merge mudata_list into one MuData object
@@ -101,6 +103,19 @@ def main(config_path: str = "config.yaml"):
         else:
             logging.info("No SoupOrCellDF found for merged data; skipping split.")
 
+    ### call_peaks: Call ATAC peaks per sample and add to merged MuData object
+    if "call_peaks" in STEPS_TO_RUN:
+        # if mudata_merged is None:
+        #     raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
+        
+        logging.info("Calling ATAC peaks per sample")
+        grouping_var = config["call_peaks_config"].get("grouping_var", "sample")
+
+        for sample in samples:
+            logging.info("Calling peaks for sample: %s", sample)
+            sample_fragments_path = os.path.join(DATA_DIR, sample, "fragments.tsv.gz")
+            utils.call_peaks(sample_fragments_path, output_dir=OBJECTS_DIR, filename=sample)
+    
     ### qc: Quality control metrics summary and plots
     if "qc" in STEPS_TO_RUN:
         if mudata_merged is None:
@@ -133,8 +148,8 @@ def main(config_path: str = "config.yaml"):
         filter_all_modalities = config["filter_config"].get("filter_all_modalities", True)
         grouping_var = config["filter_config"].get("grouping_var", "sample")
 
-        mudata_merged = utils.filter_cells_by_qc(mudata_merged, "rna", filter_all_modalities=filter_all_modalities, **rna_filter_config)
-        mudata_merged = utils.filter_cells_by_qc(mudata_merged, "atac", filter_all_modalities=filter_all_modalities, **atac_filter_config)
+        mudata_merged = utils.filter_cells_by_qc(mudata_merged, "rna", filter_all_modalities, **rna_filter_config)
+        mudata_merged = utils.filter_cells_by_qc(mudata_merged, "atac", filter_all_modalities, **atac_filter_config)
         mudata_filepath = os.path.join(OBJECTS_DIR, f"{filename}.h5mu")
         utils.save_mudata(mudata_merged, mudata_filepath)
         metrics_summary = utils.summarize_qc_metrics_grouped(mudata_merged, grouping_var)
