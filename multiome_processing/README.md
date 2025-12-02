@@ -5,22 +5,28 @@
 ```bash
 conda create -n muon_env python=3.10 -y
 conda activate muon_env
-pip install -r requirements.txt
+pip install -r requirements.txt  # install all other requirements
+conda install -c bioconda -c conda-forge macs3  # install macs3
 ```
 
-2. Set up MACS2/MACS3 environments (for peak calling).
+2. Prepare `inputs_dir` and place `samplesheet.csv` inside. 
 
-```bash
-#MACS2
-conda create -n macs2 -c bioconda -c conda-forge bioconda::macs2
-conda activate macs2
-```
+    * The pipeline will generate other files that will be saved to `inputs_dir`.
 
-```bash
-#MACS3
-conda create -n macs3 -c bioconda -c conda-forge bioconda::macs3
-conda activate macs3
-```
+    * While not required, it is recommended to create a `base_project_dir` in advance and place `inputs_dir` inside. This way, all project files are in one master folder. 
+
+    * If you follow the above suggestion, your directory structure will look like this:
+
+        ```text
+        base_project_dir
+        ├── data
+        │   └── raw
+        ├── inputs_dir
+        │   └── samplesheet.csv
+        └── outputs
+            ├── objects
+            └── plots
+        ```
 
 ## Running Pipeline
 1. Configure the `config.yaml` file (instructions are commented on each line).
