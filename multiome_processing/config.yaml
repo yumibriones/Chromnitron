@@ -19,6 +19,7 @@ steps_to_run:
   # - postqc
   # - add_metadata
   # - cluster
+  # - annotate_cell_types
   - integrate_modalities
   # - link_peaks_to_genes
   # - footprint

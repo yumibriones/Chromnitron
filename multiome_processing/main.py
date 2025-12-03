@@ -261,23 +261,13 @@ def main(config_path: str = "config.yaml"):
             filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
             utils.plot_integrated(mudata_merged, filepath, grouping_vars=grouping_vars)
 
-    # ### link_peaks_to_genes: Link ATAC peaks to genes via correlation
-    # if "link_peaks_to_genes" in STEPS_TO_RUN:
-    #     if mudata is None:
-    #         raise RuntimeError("MuData not loaded.")
-    #     corr_df = utils.link_peaks_to_genes(mudata)
-    #     if corr_df is not None:
-    #         out_csv = os.path.join(OUTPUTS_DIR, f"{project_name}_peak-gene-correlation.csv")
-    #         corr_df.to_csv(out_csv)
-    #         logging.info("Wrote peak-gene correlation scaffold to %s", out_csv)
+    ### TODO: differential_analysis: Differential expression and accessibility analysis
+
+    ### TODO: annotate_cell_types: Annotate cell types based on marker genes/peaks
+
+    ### TODO: link_peaks_to_genes: Link ATAC peaks to genes via correlation
     
-    # ### footprint: Perform TF footprinting analysis
-    # if "footprint" in STEPS_TO_RUN:
-    #     if mudata is None:
-    #         raise RuntimeError("MuData not loaded.")
-    #     tf_motifs_path = os.path.join(RESOURCES_DIR, "tf_motifs.pwm")
-    #     mudata = utils.perform_footprinting(mudata, tf_motifs_path)
-    #     utils.save_mudata(mudata, os.path.join(OUTPUTS_DIR, f"{project_name}_footprinted.h5mu"))
+    ### TODO: footprint: Perform TF footprinting analysis
 
     # logging.info("Pipeline steps completed: %s", STEPS_TO_RUN)
 

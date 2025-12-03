@@ -834,7 +834,7 @@ def plot_integrated(mudata: mu.MuData, filepath: str, grouping_vars: list = None
                 # plot mofa
                 plt.figure(figsize=(8, 6))
                 mu.pl.mofa(mudata, color=grouping_var, show=False)
-                plt.title(f"MOFA UMAP ({grouping_var})")
+                plt.title(f"MOFA ({grouping_var})")
                 plt.tight_layout()
                 pdf.savefig(plt.gcf())
                 plt.close(plt.gcf())
@@ -842,12 +842,12 @@ def plot_integrated(mudata: mu.MuData, filepath: str, grouping_vars: list = None
                 # plot umap
                 plt.figure(figsize=(8, 6))
                 sc.pl.umap(mudata, color=grouping_var, show=False)
-                plt.title(f"Integrated UMAP ({grouping_var})")
+                plt.title(f"MOFA UMAP ({grouping_var})")
                 plt.tight_layout()
                 pdf.savefig(plt.gcf())
                 plt.close(plt.gcf())
             else:
-                logging.warning("Grouping variable %s not found in mudata obs; skipping integrated UMAP plot", grouping_var)
+                logging.warning("Grouping variable %s not found in mudata obs; skipping MOFA UMAP plot", grouping_var)
 
 
 ### NOTE: Unreviewed functions
