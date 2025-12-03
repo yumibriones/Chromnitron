@@ -43,6 +43,12 @@ def create_dirs_from_samplesheet(samplesheet: pd.DataFrame, raw_out_base: str = 
         data_dir = row["path"]
         new_dir = os.path.join(raw_out_base, sample)
         create_data_dirs(data_dir=data_dir, new_dir=new_dir, sample=sample)
+        # copy SoupOrCellDF if provided
+        if "SoupOrCellDF" in samplesheet.columns and pd.notna(row["SoupOrCellDF"]):
+            src_souporcell_df = row["SoupOrCellDF"]
+            dst_souporcell_df = os.path.join(new_dir, "souporcell_df.csv")
+            shutil.copy2(src_souporcell_df, dst_souporcell_df)
+            logging.info("Copied SoupOrCellDF: %s -> %s", src_souporcell_df, dst_souporcell_df)
 
 def merge_sourporcell_dfs(samplesheet: pd.DataFrame, output_dir: str = "inputs") -> None:
     """
@@ -90,7 +96,7 @@ def create_data_dirs(data_dir: str, new_dir: str, sample: str) -> None:
     else:
         logging.warning("Fragments index not found: %s", src_frag_idx)
 
-    # Candidate locations for 10x filtered matrix: "filtered_feature_bc_matrix" or "outs/filtered_feature_bc_matrix"
+    # Copy files in filtered_feature_bc_matrix directory
     candidate_paths = [
         os.path.join(data_dir, "filtered_feature_bc_matrix"),
         os.path.join(data_dir, "outs", "filtered_feature_bc_matrix"),
@@ -115,6 +121,26 @@ def create_data_dirs(data_dir: str, new_dir: str, sample: str) -> None:
             "No filtered_feature_bc_matrix found under expected locations: %s. Searched candidates.",
             ", ".join(candidate_paths),
         )
+    
+    # Copy additional ATAC files if present
+    extra_files = [
+        "atac_peaks.bed",
+        "atac_peak_annotation.tsv",
+        "per_barcode_metrics.csv",
+        "summary.csv",   # or other summary files
+    ]
+
+    for fname in extra_files:
+        src_file = os.path.join(data_dir, fname)
+        dst_file = os.path.join(new_dir, fname)
+        if os.path.exists(src_file):
+            try:
+                shutil.copy2(src_file, dst_file)
+                logging.info("Copied %s -> %s", src_file, dst_file)
+            except Exception as e:
+                logging.warning("Failed to copy %s: %s", src_file, e)
+        else:
+            logging.warning("Extra file not found: %s", src_file)
 
 def read_10x_multiome(sample_dir: str, sample_name: str) -> mu.MuData:
     """
@@ -139,6 +165,23 @@ def read_10x_multiome(sample_dir: str, sample_name: str) -> mu.MuData:
         ac.tl.locate_fragments(mudata.mod["atac"], fragments_path)
     else:
         logging.warning("Fragments file not found for sample %s: %s", sample_name, fragments_path)
+    
+    # add donor metadata if available
+    souporcell_df_path = os.path.join(sample_dir, "souporcell_df.csv")
+    if os.path.exists(souporcell_df_path):
+        logging.info("Adding donor metadata from %s", souporcell_df_path)
+        souporcell_df = pd.read_csv(souporcell_df_path, index_col=0, dtype=str)
+        mudata = add_donor_metadata_per_sample(mudata, souporcell_df)
+    else:
+        logging.info("No souporcell_df found for merged data; skipping.")
+    
+    # add peak annotations if available
+    peak_annotation_path = os.path.join(sample_dir, "atac_peak_annotation.tsv")
+    if os.path.exists(peak_annotation_path):
+        logging.info("Adding default peak annotation from %s", peak_annotation_path)
+        mu.atac.tl.add_peak_annotation(mudata, annotation=peak_annotation_path)
+    else:
+        logging.warning("Peak annotation file not found for sample %s: %s", sample_name, peak_annotation_path)
 
     mudata.obs["sample"] = sample_name
     # Ensure layers are dicts to avoid write_h5mu error
@@ -169,6 +212,44 @@ def add_sample_prefix(mdata: mu.MuData, sample: str):
         mod.obs_names = new_names
 
     return mdata
+
+def add_donor_metadata_per_sample(mudata: mu.MuData, souporcell_df: pd.DataFrame) -> dict:
+    """
+    Add donor assignments to mudata.obs from souporcell_df.
+    souporcell_df index column must match mudata.obs_names and must contain "assignment" column.
+    """
+    souporcell_df["assignment"] = souporcell_df["assignment"].fillna("unknown")
+
+    # Merge souporcell assignments into mudata.obs
+    mudata.obs = mudata.obs.join(
+        souporcell_df[["assignment"]], how="left"
+    )
+    mudata.obs = mudata.obs.rename(columns={"assignment": "donor"})
+    
+    # Propagate to all modalities
+    for mod in mudata.mod.values():
+        mod.obs["donor"] = mudata.obs["donor"].values
+
+    return mudata
+
+def add_metadata_to_mudata(mudata: mu.MuData, metadata_df: pd.DataFrame, metadata_key: str) -> mu.MuData:
+    """
+    Add metadata from metadata_df to mudata.obs based on matching index.
+    metadata_df index must match mudata.obs_names.
+    """
+    if metadata_key not in metadata_df.columns:
+        raise ValueError(f"metadata_key '{metadata_key}' not found in metadata_df columns")
+
+    logging.info("Adding metadata '%s' to MuData", metadata_key)
+    mudata.obs = mudata.obs.join(
+        metadata_df[[metadata_key]], how="left"
+    )
+
+    # Propagate to all modalities
+    for mod in mudata.mod.values():
+        mod.obs[metadata_key] = mudata.obs[metadata_key].values
+
+    return mudata
 
 def add_donor_metadata(mudata: mu.MuData, souporcell_df: pd.DataFrame) -> dict:
     """
@@ -348,6 +429,35 @@ def compute_qc_metrics(mudata: mu.MuData, features_bed: pd.DataFrame = None) -> 
 
     return mudata
 
+def summarize_qc_metrics(mudata: mu.MuData) -> dict:
+    """
+    Summarize QC metrics for each modality in MuData.
+    """
+    from pandas.api.types import is_numeric_dtype
+    logging.info("Summarizing QC metrics for MuData")
+
+    metrics_summary = {}
+    for mod_name, mod in mudata.mod.items():
+        mod_metrics = {
+            "num_cells": mod.n_obs,
+            "num_features": mod.n_vars,
+            "metrics": {}
+        }
+        for col in mod.obs.columns:
+            if is_numeric_dtype(mod.obs[col]):
+                series = mod.obs[col]
+                mod_metrics["metrics"][col] = {
+                    "min": float(series.min()),
+                    "max": float(series.max()),
+                    "mean": float(series.mean()),
+                    "median": float(series.median()),
+                    "std": float(series.std())
+                }
+
+        metrics_summary[mod_name] = mod_metrics
+
+    return metrics_summary
+
 def summarize_qc_metrics_grouped(mudata: mu.MuData, grouping_var: str) -> dict:
     """
     Summarize QC metrics for each modality in MuData, grouped by a metadata variable.
@@ -361,7 +471,6 @@ def summarize_qc_metrics_grouped(mudata: mu.MuData, grouping_var: str) -> dict:
     grouped_summary = {}
     for group, group_obs in mudata.obs.groupby(grouping_var):
         metrics_summary = {
-            "num_cells": len(group_obs),
             "modalities": {}
         }
 
@@ -371,6 +480,7 @@ def summarize_qc_metrics_grouped(mudata: mu.MuData, grouping_var: str) -> dict:
             sub_mod = mod[cell_mask, :]
 
             mod_metrics = {
+                "num_cells": sub_mod.n_obs,
                 "num_features": sub_mod.n_vars,
                 "metrics": {}
             }
@@ -390,6 +500,25 @@ def summarize_qc_metrics_grouped(mudata: mu.MuData, grouping_var: str) -> dict:
         grouped_summary[str(group)] = metrics_summary
 
     return grouped_summary
+
+def summarize_filtering_stats(initial_counts: dict, final_counts: dict) -> dict:
+    """
+    Summarize filtering statistics given initial and final cell counts per modality.
+    """
+    logging.info("Summarizing filtering statistics")
+    stats = {}
+    for mod_name in initial_counts.keys():
+        initial = initial_counts.get(mod_name, 0)
+        final = final_counts.get(mod_name, 0)
+        filtered = initial - final
+        percent_filtered = (filtered / initial * 100) if initial > 0 else 0.0
+        stats[mod_name] = {
+            "initial_cells": initial,
+            "final_cells": final,
+            "filtered_cells": filtered,
+            "percent_filtered": percent_filtered
+        }
+    return stats
 
 def plot_qc_metrics(mudata: mu.MuData, filepath: str, grouping_var: str = "sample") -> None:
     """
@@ -500,6 +629,11 @@ def run_postqc_rna(mudata: mu.MuData, n_top_genes: int = 2000):
     """
     Normalize/scale/find HVG for RNA (scanpy-style).
     """
+    # Check if PCA already run
+    if "X_pca" in mudata.mod["rna"].obsm:
+        logging.info("RNA PCA already present; skipping")
+        return mudata
+
     logging.info("Preprocessing RNA: normalize, log1p, HVG, scale")
     rna = mudata.mod["rna"]
     sc.pp.normalize_total(rna, target_sum=1e4)
@@ -517,6 +651,11 @@ def run_postqc_atac_lsi(mudata: mu.MuData):
     """
     TF-IDF/LSI for ATAC (scanpy-style).
     """
+    # Check if LSI already run
+    if "X_lsi" in mudata.mod["atac"].obsm:
+        logging.info("ATAC LSI already present; skipping")
+        return mudata
+
     logging.info("Preprocessing ATAC: TF-IDF, LSI")
     atac = mudata.mod["atac"]
     atac.layers["counts"] = atac.X.copy()
@@ -547,15 +686,16 @@ def run_postqc_atac_pca(mudata: mu.MuData):
     mudata.mod["atac"] = atac
     return mudata
 
-def plot_postqc(mudata: mu.MuData, filepath: str, color_by: str = None, modality: str = "rna"):
+def plot_postqc(mudata: mu.MuData, filepath: str, grouping_vars: list = None, modality: str = "rna"):
     if modality not in mudata.mod:
         logging.warning("Modality %s not found; skipping", modality)
         return
-    
+    logging.info("Plotting post-QC results for modality: %s", modality)
     mod = mudata.mod[modality]
     with PdfPages(filepath) as pdf:
         # plot highly variable genes for rna
         if modality == "rna":
+            # plot highly variable genes
             plt.figure(figsize=(8, 6))
             sc.pl.highly_variable_genes(mod, show=False)
             plt.title("RNA Highly Variable Genes")
@@ -563,21 +703,38 @@ def plot_postqc(mudata: mu.MuData, filepath: str, color_by: str = None, modality
             pdf.savefig(plt.gcf())
             plt.close(plt.gcf())
 
-        # plot pca
-        plt.figure(figsize=(8, 6))
-        sc.pl.pca(mod, color=color_by, show=False)
-        plt.title(f"{modality.upper()} PCA")
-        plt.tight_layout()
-        pdf.savefig(plt.gcf())
-        plt.close(plt.gcf())
+            # plot variance ratio
+            plt.figure(figsize=(8, 6))
+            sc.pl.pca_variance_ratio(mod, log=True, show=False)
+            plt.title(f"{modality.upper()} PCA Variance Ratio")
+            plt.tight_layout()
+            pdf.savefig(plt.gcf())
+            plt.close(plt.gcf())
 
-        # plot variance ratio
-        plt.figure(figsize=(8, 6))
-        sc.pl.pca_variance_ratio(mod, log=True, show=False)
-        plt.title(f"{modality.upper()} PCA Variance Ratio")
-        plt.tight_layout()
-        pdf.savefig(plt.gcf())
-        plt.close(plt.gcf())
+            # plot pca for each grouping_var
+            for grouping_var in grouping_vars or []:
+                if grouping_var not in mod.obs.columns:
+                    logging.warning("Grouping variable %s not found in %s obs; skipping PCA plot", grouping_var, modality)
+                    continue
+                plt.figure(figsize=(8, 6))
+                sc.pl.pca(mod, color=grouping_var, show=False)
+                plt.title(f"{modality.upper()} PCA ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
+        
+        if modality == "atac":
+            # plot LSI scatter
+            for grouping_var in grouping_vars or []:
+                if grouping_var not in mod.obs.columns:
+                    logging.warning("Grouping variable %s not found in %s obs; skipping LSI plot", grouping_var, modality)
+                    continue
+                plt.figure(figsize=(8, 6))
+                sc.pl.embedding(mod, basis="X_lsi", color=grouping_var, show=False)
+                plt.title(f"{modality.upper()} LSI ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
 
 def run_cluster_rna(mudata: mu.MuData, n_neighbors: int = 10, min_dist: float = 0.5, resolution: float = 0.5, random_state=9) -> mu.MuData:
     """
@@ -590,25 +747,57 @@ def run_cluster_rna(mudata: mu.MuData, n_neighbors: int = 10, min_dist: float = 
         
     logging.info("Running UMAP on RNA modality")
     rna = mudata.mod["rna"]
-    sc.pp.neighbors(rna, n_neighbors=n_neighbors, use_rep="X_pca")
+    sc.pp.neighbors(rna, n_neighbors=n_neighbors, use_rep="X_pca", n_pcs=30)
     sc.tl.leiden(rna, resolution=resolution, key_added="rna_leiden")
     sc.tl.umap(rna, min_dist=min_dist, random_state=random_state)
     mudata.mod["rna"] = rna
     return mudata
 
-def plot_rna_umap(mudata: mu.MuData, filepath: str, color_by: str = "sample"):
+def run_cluster_atac_lsi(mudata: mu.MuData, n_neighbors: int = 10, min_dist: float = 0.5, resolution: float = 0.5, random_state=9) -> mu.MuData:
     """
-    Plot RNA UMAP and save to PDF.
+    Run UMAP on ATAC modality in MuData.
     """
-    logging.info("Plotting RNA UMAP")
+    # check if previously run
+    if "atac_leiden" in mudata.mod["atac"].obs and "X_umap" in mudata.mod["atac"].obsm:
+        logging.info("ATAC UMAP and clustering already present; skipping")
+        return mudata
+        
+    logging.info("Running UMAP on ATAC modality")
+    atac = mudata.mod["atac"]
+    sc.pp.neighbors(atac, n_neighbors=n_neighbors, use_rep="X_lsi", n_pcs=30)
+    sc.tl.leiden(atac, resolution=resolution, key_added="atac_leiden")
+    sc.tl.umap(atac, min_dist=min_dist, random_state=random_state)
+    mudata.mod["atac"] = atac
+    return mudata
+
+def plot_clusters(mudata: mu.MuData, filepath: str, grouping_vars: list = None) -> None:
+    """
+    Plot RNA and ATAC UMAP colored by a given metadata column and save to PDF.
+    """
+    logging.info("Plotting UMAP")
     rna = mudata.mod["rna"]
+    atac = mudata.mod["atac"]
     with PdfPages(filepath) as pdf:
-        plt.figure(figsize=(8, 6))
-        sc.pl.umap(rna, color=color_by, show=False)
-        plt.title("RNA UMAP")
-        plt.tight_layout()
-        pdf.savefig(plt.gcf())
-        plt.close(plt.gcf())
+        for grouping_var in grouping_vars or []:
+            if grouping_var in rna.obs.columns:
+                plt.figure(figsize=(8, 6))
+                sc.pl.umap(rna, color=grouping_var, show=False)
+                plt.title(f"RNA UMAP ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
+            else:
+                logging.warning("Grouping variable %s not found in RNA obs; skipping RNA UMAP plot", grouping_var)
+
+            if grouping_var in atac.obs.columns:
+                plt.figure(figsize=(8, 6))
+                sc.pl.umap(atac, color=grouping_var, show=False)
+                plt.title(f"ATAC UMAP ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
+            else:
+                logging.warning("Grouping variable %s not found in ATAC obs; skipping ATAC UMAP plot", grouping_var)
 
 ### NOTE: Unreviewed functions
 

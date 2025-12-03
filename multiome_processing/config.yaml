@@ -1,21 +1,24 @@
 setup:
+  project_prefix: Pool1  # Prefix for naming files
   resources_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/chromnitron/input_resources  # (Required) Path to input resources
   inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs  # (Required) Path to input data directories, must exist
   sample_sheet: samplesheet.csv  # (Required) Name of CSV file in inputs_dir with columns: sampleName, path (to 10x multiome folder), (optional) SoupOrCellDF
-  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1_with_donors.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
   base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs, will be created if does not exist
-  project_prefix: Pool1  # Prefix for naming files
+  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
+  metadata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs/metadata_romane_muon.csv  # (Optional) Path to CSV file with metadata to add to MuData object
+  metadata_key: cell_type  # (Optional) Column name in metadata_file to use as key for merging metadata
   
 # Define the steps of the pipeline to run, in order (comment out steps to skip)
 steps_to_run:  
   # - initialize
   # - create_mudata
   # - add_donor_metadata
-  - call_peaks
-  # - qc
-  # - filter
-  # - postqc
-  # - cluster
+  # - call_peaks
+  - qc
+  - filter
+  - postqc
+  - cluster
+  - add_metadata
   # - link_peaks_to_genes
   # - footprint
   # - differential_analysis
@@ -27,11 +30,13 @@ call_peaks_config:
 
 qc_config:
   qc_sheet_path:  # (Optional) Path to CSV file containing clusters to remove per sample
-  grouping_var: sample # Grouping variable for QC summary and plots
   plotting: True  # Whether to generate QC plots
+  grouping_vars:  # Grouping variables for QC summary and plots
+    - sample
+    - donor
 
 filter_config:
-  filter_all_modalities: True  # Whether to filter both RNA and ATAC modalities based on QC metrics
+  filter_all_modalities: False  # Whether to filter both RNA and ATAC modalities based on QC metrics
   rna:
     min_n_genes_by_counts: 500
     min_total_counts: 1000
@@ -43,13 +48,17 @@ filter_config:
     max_total_counts: 70000
     max_nucleosome_signal: 2.0
     min_tss_score: 1.0
-  grouping_var: sample  # Grouping variable for QC summary and plots
   plotting: True  # Whether to generate QC plots after filtering
+  grouping_vars:  # Grouping variables for QC summary and plots
+    - sample
+    - donor
 
 postqc_config:
   run_harmony: True  # Whether to run Harmony batch correction after QC
-  grouping_var: sample  # Grouping variable for post-QC summary and plots
   plotting: True  # Whether to generate post-QC plots
+  grouping_vars:  # Grouping variables for post-QC plots
+    - sample
+    - donor
 
 cluster_config:
   params:
@@ -57,9 +66,13 @@ cluster_config:
     min_dist: 0.5  # Minimum distance for UMAP
     resolution: 0.5  # Resolution for clustering
     random_state: 9  # Random state for reproducibility
-  grouping_var: cell_type  # Grouping variable for cluster plots
   plotting: True  # Whether to generate cluster plots
-
+  grouping_vars:  # Grouping variables for UMAP plots
+    - sample
+    - donor
+    - rna_leiden
+    - atac_leiden
+    - cell_type
 
 footprint_config:
   footprint_peaks_path:  # Path to TXT file containing ATAC peaks to run footprinting on

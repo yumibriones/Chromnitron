@@ -9,7 +9,19 @@ pip install -r requirements.txt  # install all other requirements
 conda install -c bioconda -c conda-forge macs3  # install macs3
 ```
 
-2. Prepare `inputs_dir` and place `samplesheet.csv` inside. 
+2. Prepare `samplesheet.csv` and fill in the following columns:
+
+    * `sampleName`: Name of single 10X Multiome run
+    * `path`: path to CellRanger output. Must contain the following files:
+        * `filtered_feature_bc_matrix/`
+            * `barcodes.tsv.gz`
+            * `features.tsv.gz`
+            * `matrix.mtx.gz`
+        * `atac_fragments.tsv.gz`
+    * `SoupOrCellDF`: path to Souporcell CSV containing donor assignments.
+
+
+3. Prepare `inputs_dir` and place `samplesheet.csv` inside. 
 
     * The pipeline will generate other files that will be saved to `inputs_dir`.
 

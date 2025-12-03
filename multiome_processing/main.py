@@ -65,10 +65,12 @@ def main(config_path: str = "config.yaml"):
         print("Initializing data dirs and inputs from samplesheet")
         utils.create_dirs_from_samplesheet(samplesheet, DATA_DIR)
         utils.merge_sourporcell_dfs(samplesheet, INPUTS_DIR)
-        merged_fragments_path = os.path.join(INPUTS_DIR, "merged_fragments.tsv.gz")
+        # merged_fragments_path = os.path.join(INPUTS_DIR, "merged_fragments.tsv.gz")
         # utils.merge_fragments_tsv(samples, DATA_DIR, merged_fragments_path)
 
-    ### create_mudata: Create and save MuData objects per sample in sample sheet
+    ### create_mudata: Create and save MuData objects per sample in sample sheet.
+    ### If files exist, adds Souporcell donor metadata and CellRanger ATAC peak annotations.
+    ### Computes QC metrics, and merges into one MuData object.
     if "create_mudata" in STEPS_TO_RUN:
         mudata_list = {}
         for sample in samples:
@@ -77,7 +79,7 @@ def main(config_path: str = "config.yaml"):
                 mudata_obj = utils.read_10x_multiome(sample_dir, sample)
                 mudata_list[sample] = mudata_obj
                 # compute qc metrics right after creation
-                features_bed_path = os.path.join(RESOURCES_DIR, "features.bed")
+                features_bed_path = os.path.join(RESOURCES_DIR, "DNA_sequence", "features.bed")
                 gff_path = os.path.join(RESOURCES_DIR, "DNA_sequence", "gencode.v45.transcripts.annotation.gff3")
                 features_bed = utils.get_features_bed(features_bed_path, gff_path)
                 mudata_obj = utils.compute_qc_metrics(mudata_obj, features_bed)
@@ -88,7 +90,7 @@ def main(config_path: str = "config.yaml"):
         mudata_filepath = os.path.join(OBJECTS_DIR, f"{PROJECT_PREFIX}.h5mu")
         utils.save_mudata(mudata_merged, mudata_filepath)
 
-    ### add_donor_metadata: Add donor metadata to merged MuData object
+    ### add_donor_metadata: If donor metadata was not added in previous step, add it now
     if "add_donor_metadata" in STEPS_TO_RUN:
         if mudata_merged is None:
             raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
@@ -103,11 +105,12 @@ def main(config_path: str = "config.yaml"):
         else:
             logging.info("No SoupOrCellDF found for merged data; skipping split.")
 
-    ### call_peaks: Call ATAC peaks per sample and add to merged MuData object
+    ### call_peaks: Call ATAC peaks with MACS3 per sample
+    ### TODO: Add grouping_var functionality, have to manipulate fragments files for this though
+    ### TODO: Add peak annotations to MuData objects after peak calling
     if "call_peaks" in STEPS_TO_RUN:
         # if mudata_merged is None:
         #     raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
-        
         logging.info("Calling ATAC peaks per sample")
         grouping_var = config["call_peaks_config"].get("grouping_var", "sample")
 
@@ -121,87 +124,123 @@ def main(config_path: str = "config.yaml"):
         if mudata_merged is None:
             raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
         
-        logging.info("QC stage for merged MuData object")
-        grouping_var = config["qc_config"].get("grouping_var", "sample")
-        filename = f"{PROJECT_PREFIX}_by_{grouping_var}_qc"
-        
-        metrics_summary = utils.summarize_qc_metrics_grouped(mudata_merged, grouping_var)
-        with open(os.path.join(OUTPUTS_DIR, f"{filename}.json"), "w") as f:
-            json.dump(metrics_summary, f, indent=4)
-        
-        # Plot if enabled
-        plot_qc = config["qc_config"].get("plotting", True)
-        if plot_qc:
-            filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
-            utils.plot_qc_metrics(mudata_merged, filepath, grouping_var)
+        logging.info("Summarizing and plotting QC metrics")
+
+        # Global metrics summary
+        global_filename = f"{PROJECT_PREFIX}_global_qc"
+        global_metrics_summary = utils.summarize_qc_metrics(mudata_merged)
+        with open(os.path.join(OUTPUTS_DIR, f"{global_filename}.json"), "w") as f:
+            json.dump(global_metrics_summary, f, indent=4)
+
+        # Grouped QC metrics summary and plots
+        grouping_vars = config["qc_config"].get("grouping_vars", ["sample"])
+        for grouping_var in grouping_vars:
+            filename = f"{PROJECT_PREFIX}_by_{grouping_var}_qc"
+            
+            metrics_summary = utils.summarize_qc_metrics_grouped(mudata_merged, grouping_var)
+            with open(os.path.join(OUTPUTS_DIR, f"{filename}.json"), "w") as f:
+                json.dump(metrics_summary, f, indent=4)
+            
+            # Plot if enabled
+            plot_qc = config["qc_config"].get("plotting", True)
+            if plot_qc:
+                filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
+                utils.plot_qc_metrics(mudata_merged, filepath, grouping_var)
 
     ### filter: Filter cells by QC thresholds
     if "filter" in STEPS_TO_RUN:
         if mudata_merged is None:
             raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
         
-        logging.info("Filtering stage for merged MuData object")
+        logging.info("Filtering cells by QC thresholds")
         rna_filter_config = config.get("filter_config", {}).get("rna", {})
         atac_filter_config = config.get("filter_config", {}).get("atac", {})
-        filename = f"{PROJECT_PREFIX}_by_{grouping_var}_filtered"
-        
         filter_all_modalities = config["filter_config"].get("filter_all_modalities", True)
-        grouping_var = config["filter_config"].get("grouping_var", "sample")
 
+        # Global cells filtering
         mudata_merged = utils.filter_cells_by_qc(mudata_merged, "rna", filter_all_modalities, **rna_filter_config)
         mudata_merged = utils.filter_cells_by_qc(mudata_merged, "atac", filter_all_modalities, **atac_filter_config)
-        mudata_filepath = os.path.join(OBJECTS_DIR, f"{filename}.h5mu")
+        global_filename = f"{PROJECT_PREFIX}_filtered"
+        mudata_filepath = os.path.join(OBJECTS_DIR, f"{global_filename}.h5mu")
         utils.save_mudata(mudata_merged, mudata_filepath)
-        metrics_summary = utils.summarize_qc_metrics_grouped(mudata_merged, grouping_var)
 
-        with open(os.path.join(OUTPUTS_DIR, f"{filename}.json"), "w") as f:
-            json.dump(metrics_summary, f, indent=4)
+        # Global QC metrics summary after filtering
+        global_metrics_summary = utils.summarize_qc_metrics(mudata_merged)
+        with open(os.path.join(OUTPUTS_DIR, f"{global_filename}_qc.json"), "w") as f:
+            json.dump(global_metrics_summary, f, indent=4)
 
-        # Plot if enabled
-        plot_filter = config["filter_config"].get("plotting", True)
-        if plot_filter:
-            filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
-            utils.plot_qc_metrics(mudata_merged, filepath, grouping_var)
+        # Grouped QC metrics summary and plots after filtering
+        grouping_vars = config["filter_config"].get("grouping_vars", ["sample"])
+        for grouping_var in grouping_vars:
+            filename = f"{PROJECT_PREFIX}_by_{grouping_var}_filtered_qc"
+            metrics_summary = utils.summarize_qc_metrics_grouped(mudata_merged, grouping_var)
+            with open(os.path.join(OUTPUTS_DIR, f"{filename}.json"), "w") as f:
+                json.dump(metrics_summary, f, indent=4)
+            # Plot if enabled
+            plot_filter = config["filter_config"].get("plotting", True)
+            if plot_filter:
+                filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
+                utils.plot_qc_metrics(mudata_merged, filepath, grouping_var)
 
     ### postqc: Post-QC processing (normalization, HVG, LSI)
     if "postqc" in STEPS_TO_RUN:
         if mudata_merged is None:
             raise RuntimeError("MuData not loaded.")
 
-        logging.info("PostQC stage: calculating normalized RNA, HVG, ATAC LSI")
-        grouping_var = config.get("postqc_config", {}).get("grouping_var", "sample")
-        filename = f"{PROJECT_PREFIX}_by_{grouping_var}_postqc"
+        logging.info("Normalizing and performing dimensionality reduction")
 
+        # Global processing
         mudata_merged = utils.run_postqc_rna(mudata_merged)
-        # mudata_merged = utils.run_postqc_atac_lsi(mudata_merged)
+        mudata_merged = utils.run_postqc_atac_lsi(mudata_merged)
+        filename = f"{PROJECT_PREFIX}_postqc"
         mudata_filepath = os.path.join(OBJECTS_DIR, f"{filename}.h5mu")
         utils.save_mudata(mudata_merged, mudata_filepath)
         
         # Plot if enabled
         plot_postqc = config.get("postqc_config", {}).get("plotting", True)
         if plot_postqc:
-            filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
-            utils.plot_postqc(mudata_merged, filepath, color_by=grouping_var)
+            grouping_vars = config.get("postqc_config", {}).get("grouping_vars", ["sample"])
+            rna_filepath = os.path.join(PLOTS_DIR, f"{filename}_rna.pdf")
+            utils.plot_postqc(mudata_merged, rna_filepath, grouping_vars=grouping_vars, modality="rna")
+            atac_filepath = os.path.join(PLOTS_DIR, f"{filename}_atac.pdf")
+            utils.plot_postqc(mudata_merged, atac_filepath, grouping_vars=grouping_vars, modality="atac")
 
     ### cluster: Clustering analysis
     if "cluster" in STEPS_TO_RUN:
         if mudata_merged is None:
             raise RuntimeError("MuData not loaded.")
-        logging.info("Clustering stage for merged MuData object")
-        cluster_params = config.get("cluster_config", {}).get("params", {})
-        grouping_var = config.get("cluster_config", {}).get("grouping_var", "sample")
-        filename = f"{PROJECT_PREFIX}_by_{grouping_var}_clustered"
 
+        logging.info("Clustering")
+        cluster_params = config.get("cluster_config", {}).get("params", {})
         mudata_merged = utils.run_cluster_rna(mudata_merged, **cluster_params)
+        mudata_merged = utils.run_cluster_atac_lsi(mudata_merged, **cluster_params)
+        filename = f"{PROJECT_PREFIX}_clustered"
         mudata_filepath = os.path.join(OBJECTS_DIR, f"{filename}.h5mu")
         utils.save_mudata(mudata_merged, mudata_filepath)
 
         # Plot if enabled
         plot_cluster = config.get("cluster_config", {}).get("plotting", True)
         if plot_cluster:
+            grouping_vars = config.get("cluster_config", {}).get("grouping_vars", ["sample"])
             filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
-            utils.plot_rna_umap(mudata_merged, filepath, color_by=grouping_var)
+            utils.plot_clusters(mudata_merged, filepath, grouping_vars=grouping_vars)
 
+    ### if add_metadata: Add metadata from provided metadata file to MuData object
+    if "add_metadata" in STEPS_TO_RUN:
+        if mudata_merged is None:
+            raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
+        
+        logging.info("Adding metadata to merged MuData object")
+        metadata_file = setup_config.get("metadata_file", None)
+        metadata_key = setup_config.get("metadata_key", None)
+        if metadata_file is not None and metadata_key is not None:
+            metadata_df = pd.read_csv(metadata_file, dtype=str)
+            mudata_merged = utils.add_metadata_to_mudata(mudata_merged, metadata_df, metadata_key)
+            mudata_filepath = os.path.join(OBJECTS_DIR, f"{PROJECT_PREFIX}_with_metadata.h5mu")
+            utils.save_mudata(mudata_merged, mudata_filepath)
+        else:
+            logging.info("No metadata_file or metadata_key provided; skipping adding metadata.")
+            
     # ### link_peaks_to_genes: Link ATAC peaks to genes via correlation
     # if "link_peaks_to_genes" in STEPS_TO_RUN:
     #     if mudata is None:
