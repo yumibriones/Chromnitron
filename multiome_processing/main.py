@@ -205,6 +205,22 @@ def main(config_path: str = "config.yaml"):
             atac_filepath = os.path.join(PLOTS_DIR, f"{filename}_atac.pdf")
             utils.plot_postqc(mudata_merged, atac_filepath, grouping_vars=grouping_vars, modality="atac")
 
+    ### if add_metadata: Add metadata from provided metadata file to MuData object
+    if "add_metadata" in STEPS_TO_RUN:
+        if mudata_merged is None:
+            raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
+        
+        logging.info("Adding metadata to merged MuData object")
+        metadata_file = setup_config.get("metadata_file", None)
+        metadata_key = setup_config.get("metadata_key", None)
+        if metadata_file is not None and metadata_key is not None:
+            metadata_df = pd.read_csv(metadata_file, index_col=0, dtype=str)
+            mudata_merged = utils.add_metadata_to_mudata(mudata_merged, metadata_df, metadata_key)
+            mudata_filepath = os.path.join(OBJECTS_DIR, f"{PROJECT_PREFIX}_with_metadata.h5mu")
+            utils.save_mudata(mudata_merged, mudata_filepath)
+        else:
+            logging.info("No metadata_file or metadata_key provided; skipping adding metadata.")
+
     ### cluster: Clustering analysis
     if "cluster" in STEPS_TO_RUN:
         if mudata_merged is None:
@@ -224,23 +240,27 @@ def main(config_path: str = "config.yaml"):
             grouping_vars = config.get("cluster_config", {}).get("grouping_vars", ["sample"])
             filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
             utils.plot_clusters(mudata_merged, filepath, grouping_vars=grouping_vars)
-
-    ### if add_metadata: Add metadata from provided metadata file to MuData object
-    if "add_metadata" in STEPS_TO_RUN:
+    
+    ### integrate_modalities: Integrate RNA and ATAC modalities
+    if "integrate_modalities" in STEPS_TO_RUN:
         if mudata_merged is None:
-            raise RuntimeError("MuData not loaded. Run create_mudata or provide --mudata_files.")
-        
-        logging.info("Adding metadata to merged MuData object")
-        metadata_file = setup_config.get("metadata_file", None)
-        metadata_key = setup_config.get("metadata_key", None)
-        if metadata_file is not None and metadata_key is not None:
-            metadata_df = pd.read_csv(metadata_file, dtype=str)
-            mudata_merged = utils.add_metadata_to_mudata(mudata_merged, metadata_df, metadata_key)
-            mudata_filepath = os.path.join(OBJECTS_DIR, f"{PROJECT_PREFIX}_with_metadata.h5mu")
-            utils.save_mudata(mudata_merged, mudata_filepath)
-        else:
-            logging.info("No metadata_file or metadata_key provided; skipping adding metadata.")
-            
+            raise RuntimeError("MuData not loaded.")
+
+        logging.info("Integrating RNA and ATAC modalities")
+        # integration_params = config.get("integrate_modalities_config", {}).get("params", {})
+        mofa_filepath = os.path.join(OBJECTS_DIR, f"{PROJECT_PREFIX}_mofa.hdf5")
+        mudata_merged = utils.integrate_modalities(mudata_merged, mofa_filepath)
+        filename = f"{PROJECT_PREFIX}_integrated"
+        mudata_filepath = os.path.join(OBJECTS_DIR, f"{filename}.h5mu")
+        utils.save_mudata(mudata_merged, mudata_filepath)
+
+        # Plot if enabled
+        plot_integration = config.get("integrate_modalities_config", {}).get("plotting", True)
+        if plot_integration:
+            grouping_vars = config.get("integrate_modalities_config", {}).get("grouping_vars", ["sample"])
+            filepath = os.path.join(PLOTS_DIR, f"{filename}.pdf")
+            utils.plot_integrated(mudata_merged, filepath, grouping_vars=grouping_vars)
+
     # ### link_peaks_to_genes: Link ATAC peaks to genes via correlation
     # if "link_peaks_to_genes" in STEPS_TO_RUN:
     #     if mudata is None:

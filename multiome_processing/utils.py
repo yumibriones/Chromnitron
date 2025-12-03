@@ -24,6 +24,11 @@ setup_logging()
 
 md.set_options(pull_on_update=False)
 
+def save_mudata(mudata: mu.MuData, filepath: str):
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    logging.info("Saving MuData to %s", filepath)
+    mudata.write_h5mu(filepath)
+
 def create_dirs_from_samplesheet(samplesheet: pd.DataFrame, raw_out_base: str = "data/raw") -> None:
     """
     Read a samplesheet CSV with columns `sampleName` and `path` and run create_data_dirs for each row.
@@ -237,6 +242,8 @@ def add_metadata_to_mudata(mudata: mu.MuData, metadata_df: pd.DataFrame, metadat
     Add metadata from metadata_df to mudata.obs based on matching index.
     metadata_df index must match mudata.obs_names.
     """
+    metadata_df.fillna("unknown", inplace=True)
+
     if metadata_key not in metadata_df.columns:
         raise ValueError(f"metadata_key '{metadata_key}' not found in metadata_df columns")
 
@@ -247,7 +254,7 @@ def add_metadata_to_mudata(mudata: mu.MuData, metadata_df: pd.DataFrame, metadat
 
     # Propagate to all modalities
     for mod in mudata.mod.values():
-        mod.obs[metadata_key] = mudata.obs[metadata_key].values
+        mod.obs[metadata_key] = mudata.obs.loc[mod.obs_names, metadata_key].values
 
     return mudata
 
@@ -799,6 +806,50 @@ def plot_clusters(mudata: mu.MuData, filepath: str, grouping_vars: list = None) 
             else:
                 logging.warning("Grouping variable %s not found in ATAC obs; skipping ATAC UMAP plot", grouping_var)
 
+def integrate_modalities(mudata: mu.MuData, mofa_filepath: str) -> mu.MuData:
+    """
+    Multi-omics factor analysis (MOFA) integration of RNA and ATAC modalities in MuData.
+    """
+    # check if previously run
+    if "mofa_leiden" in mudata.obs and "X_mofa" in mudata.obsm:
+        logging.info("MOFA integration already present; skipping")
+        return mudata
+    
+    logging.info("Running MOFA integration of RNA and ATAC modalities")
+    mu.pp.intersect_obs(mudata)
+    mu.tl.mofa(mudata, outfile=mofa_filepath)
+    sc.pp.neighbors(mudata, use_rep="X_mofa")
+    sc.tl.umap(mudata)
+    sc.tl.leiden(mudata, resolution=0.5, key_added="mofa_leiden")
+    return mudata
+
+def plot_integrated(mudata: mu.MuData, filepath: str, grouping_vars: list = None) -> None:
+    """
+    Plot integrated UMAP colored by a given metadata column and save to PDF.
+    """
+    logging.info("Plotting integrated UMAP")
+    with PdfPages(filepath) as pdf:
+        for grouping_var in grouping_vars or []:
+            if grouping_var in mudata.obs.columns:
+                # plot mofa
+                plt.figure(figsize=(8, 6))
+                mu.pl.mofa(mudata, color=grouping_var, show=False)
+                plt.title(f"MOFA UMAP ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
+
+                # plot umap
+                plt.figure(figsize=(8, 6))
+                sc.pl.umap(mudata, color=grouping_var, show=False)
+                plt.title(f"Integrated UMAP ({grouping_var})")
+                plt.tight_layout()
+                pdf.savefig(plt.gcf())
+                plt.close(plt.gcf())
+            else:
+                logging.warning("Grouping variable %s not found in mudata obs; skipping integrated UMAP plot", grouping_var)
+
+
 ### NOTE: Unreviewed functions
 
 def run_harmony(adata: ad.AnnData, key: str = "batch", max_iter_harmony: int = 100):
@@ -819,69 +870,6 @@ def run_harmony(adata: ad.AnnData, key: str = "batch", max_iter_harmony: int = 1
     adata.obsm["X_pca_harmony"] = ho.Z_corr.T
     return adata
 
-
-def construct_wnn(mudata: mu.MuData,
-                  rna_key: str = "X_pca",
-                  atac_key: str = "X_lsi",
-                  n_neighbors: int = 30,
-                  rna_weight: float = 0.5,
-                  atac_weight: float = 0.5):
-    """
-    Approximate a WNN by computing modality-specific neighbor graphs and combining adjacency weights.
-    Returns an adjacency matrix and stores neighbor indices in mudata.obs as metadata for plotting.
-    """
-    logging.info("Constructing approximate WNN graph (combining RNA and ATAC neighbors)")
-    rna = mudata.mod["rna"]
-    atac = mudata.mod["atac"]
-
-    # Get embeddings
-    if rna_key in rna.obsm:
-        rna_emb = rna.obsm[rna_key]
-    else:
-        logging.info("RNA embedding %s missing, computing PCA embedding", rna_key)
-        sc.tl.pca(rna, n_comps=30)
-        rna_emb = rna.obsm["X_pca"]
-
-    if atac_key in atac.obsm:
-        atac_emb = atac.obsm["X_lsi"]
-    else:
-        logging.info("ATAC embedding missing; run TF-IDF/LSI first")
-        atac_emb = None
-
-    # Compute neighbor graphs (use sklearn NearestNeighbors)
-    n = rna.n_obs
-    if rna_emb is None:
-        raise RuntimeError("RNA embedding required for WNN")
-
-    nbrs_rna = NearestNeighbors(n_neighbors=n_neighbors, algorithm='auto').fit(rna_emb)
-    dist_rna, idx_rna = nbrs_rna.kneighbors(rna_emb)
-
-    if atac_emb is not None and atac_emb.shape[0] == n:
-        nbrs_atac = NearestNeighbors(n_neighbors=n_neighbors, algorithm='auto').fit(atac_emb)
-        dist_atac, idx_atac = nbrs_atac.kneighbors(atac_emb)
-    else:
-        idx_atac = None
-
-    # Store neighbors in obs (as simple counts or indices)
-    mudata.obs["rna_nbrs_mean_dist"] = dist_rna.mean(axis=1)
-    if idx_atac is not None:
-        mudata.obs["atac_nbrs_mean_dist"] = dist_atac.mean(axis=1)
-
-    # For visualization and clustering, pick to use combined embedding as concatenation weighted
-    if atac_emb is not None and atac_emb.shape[0] == n:
-        combined = np.hstack([rna_emb * rna_weight, atac_emb * atac_weight])
-    else:
-        combined = rna_emb
-
-    # Create a single AnnData for neighbors and UMAP
-    combined_adata = ad.AnnData(X=combined, obs=mudata.obs.copy())
-    sc.pp.neighbors(combined_adata, n_neighbors=n_neighbors, use_rep="X")
-    sc.tl.umap(combined_adata)
-    # attach wnn umap coordinates back to mudata
-    mudata.obsm["wnn_umap"] = combined_adata.obsm["X_umap"]
-    return mudata
-
-
 def find_markers_rna(mudata: mu.MuData, groupby: str = "wsnn_res", resolution: float = 0.5, n_top: int = 5):
     """
     Cluster by RNA PCA and find cluster markers (scanpy rank_genes_groups)
@@ -901,7 +889,6 @@ def find_markers_rna(mudata: mu.MuData, groupby: str = "wsnn_res", resolution: f
         markers[g] = df.head(n_top)
     return markers
 
-
 def pseudobulk_de_by_celltype(mudata: mu.MuData, celltype_key: str = "celltype", group_key: str = "disease"):
     """
     Create pseudobulk (sum counts per sample per celltype) for RNA and run DE with statsmodels or edgeR/DESeq2 externally.
@@ -920,7 +907,6 @@ def pseudobulk_de_by_celltype(mudata: mu.MuData, celltype_key: str = "celltype",
     expr_df = expr_df.join(groups)
     pb = expr_df.groupby(["sample", celltype_key]).sum()
     return pb
-
 
 def link_peaks_to_genes(mudata: mu.MuData, distance: int = 250000):
     """
@@ -951,28 +937,3 @@ def link_peaks_to_genes(mudata: mu.MuData, distance: int = 250000):
         corr[g] = np.corrcoef(activity_vec, expr)[0, 1]
     corr_df = pd.Series(corr).sort_values(ascending=False).to_frame("corr_with_activity")
     return corr_df
-
-def save_mudata(mudata: mu.MuData, filepath: str):
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    logging.info("Saving MuData to %s", filepath)
-    mudata.write_h5mu(filepath)
-
-### NOTE: Unused functions
-
-# def read_mudata_list(mudata_files: list) -> dict:
-#     """
-#     Read multiple MuData files into a dictionary.
-
-#     Parameters
-#     - mudata_files: list of paths to MuData .h5mu files
-
-#     Returns
-#     - dict mapping sample names (derived from filenames) to MuData objects
-#     """
-#     mudata_list = {}
-#     for path in mudata_files:
-#         logging.info("Loading MuData from %s", path)
-#         mudata = mu.read_h5mu(path)
-#         sample_name = mudata.obs["sample"].iloc[0]
-#         mudata_list[sample_name] = mudata
-#     return mudata_list

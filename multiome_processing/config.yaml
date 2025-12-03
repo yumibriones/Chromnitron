@@ -4,7 +4,7 @@ setup:
   inputs_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs  # (Required) Path to input data directories, must exist
   sample_sheet: samplesheet.csv  # (Required) Name of CSV file in inputs_dir with columns: sampleName, path (to 10x multiome folder), (optional) SoupOrCellDF
   base_project_dir: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins  # Base directory for project outputs, will be created if does not exist
-  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
+  mudata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/outputs/objects/Pool1_clustered.h5mu  # (Optional) Path to existing MuData file to use as input instead of creating new one
   metadata_file: /gpfs/home/yb2612/yb2612_tsirigos/Chromnitron/data/twins_multiome/muon_twins/inputs/metadata_romane_muon.csv  # (Optional) Path to CSV file with metadata to add to MuData object
   metadata_key: cell_type  # (Optional) Column name in metadata_file to use as key for merging metadata
   
@@ -14,11 +14,12 @@ steps_to_run:
   # - create_mudata
   # - add_donor_metadata
   # - call_peaks
-  - qc
-  - filter
-  - postqc
-  - cluster
-  - add_metadata
+  # - qc
+  # - filter
+  # - postqc
+  # - add_metadata
+  # - cluster
+  - integrate_modalities
   # - link_peaks_to_genes
   # - footprint
   # - differential_analysis
@@ -72,6 +73,15 @@ cluster_config:
     - donor
     - rna_leiden
     - atac_leiden
+    - cell_type
+
+integrate_modalities_config:
+  mofa_n_factors: 15  # Number of MOFA factors to use for integration
+  plotting: True  # Whether to generate integrated UMAP plots
+  grouping_vars:  # Grouping variables for integrated UMAP plots
+    - sample
+    - donor
+    - mofa_leiden
     - cell_type
 
 footprint_config:
